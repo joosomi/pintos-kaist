@@ -18,6 +18,7 @@
 #endif
 
 /* Number of timer ticks since OS booted. */
+// 시스템 틱인듯
 static int64_t ticks;
 
 /* Number of loops per timer tick.
@@ -71,6 +72,7 @@ timer_calibrate (void) {
 }
 
 /* Returns the number of timer ticks since the OS booted. */
+// OS 부팅 후 타이머 틱 수를 반환
 int64_t
 timer_ticks (void) {
 	enum intr_level old_level = intr_disable ();
@@ -88,13 +90,25 @@ timer_elapsed (int64_t then) {
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
+// running중인 스레드를 ticks 동안 sleep_list에 넣어 blocked 시킨다
+// 지정된 tick이 지나면 다시 ready_list에 넣는다
 void
 timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
 
+	// 시간 재기 ( OS 부팅 후 시간을 가져온다 )
+	int64_t start = timer_ticks ();
+	
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	
+	
+	// elapsed는 start이후로 지난 시간을 반환한다.
+	// ticks가 0이 아니라면 재우게 된다.
+	if(timer_elapsed(start) < ticks) {
+		
+		// start + ticks 시간까지 잠재우게 된다
+		thread_sleep(start + ticks);
+		
+	}
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -121,11 +135,21 @@ timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
+
+
 /* Timer interrupt handler. */
+// sleep_list의 HEAD를 확인하여 System tick과 일치하면 wakeup 시킨다. ( sleep_list 정렬되어있어야함 )
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
+	
+	// 타이머 인터럽트가 실행될 때마다 system ticks가 증가한다
 	ticks++;
+
+	// 실행 중인 프로세스의 CPU 사용량을 업데이트 하는 함수
 	thread_tick ();
+	
+	// 모든 tick마다 실행되어, wakeup할 스레드를 고르는 코드
+	thread_awake();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

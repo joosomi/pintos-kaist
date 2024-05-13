@@ -11,6 +11,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "include/devices/timer.h" // 혹시몰라서 include
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -26,7 +27,10 @@
 
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
+// ready_list 선언
 static struct list ready_list;
+// sleep_list 선언
+static struct list sleep_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -63,6 +67,9 @@ static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
 
+
+
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -79,19 +86,22 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
-/* Initializes the threading system by transforming the code
-   that's currently running into a thread.  This can't work in
-   general and it is possible in this case only because loader.S
-   was careful to put the bottom of the stack at a page boundary.
+// Initializes the threading system by transforming the code
+// that's currently running into a thread.  This can't work in
+// general and it is possible in this case only because loader.S
+// was careful to put the bottom of the stack at a page boundary.
 
-   Also initializes the run queue and the tid lock.
+// Also initializes the run queue and the tid lock.
 
-   After calling this function, be sure to initialize the page
-   allocator before trying to create any threads with
-   thread_create().
+// After calling this function, be sure to initialize the page
+// allocator before trying to create any threads with
+// thread_create().
 
-   It is not safe to call thread_current() until this function
-   finishes. */
+// It is not safe to call thread_current() until this function
+// finishes.
+// 스레드 시스템 초기화 + PintOS의 초기 스레드 생성
+// 여기서 run queue(ready_list) 초기화함
+// sleep_list도 초기화하도록 추가해야 한다
 void
 thread_init (void) {
 	ASSERT (intr_get_level () == INTR_OFF);
@@ -107,7 +117,8 @@ thread_init (void) {
 
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
-	list_init (&ready_list);
+	list_init (&ready_list); // ready_list 초기화
+	list_init (&sleep_list); // sleep_list 초기화
 	list_init (&destruction_req);
 
 	/* Set up a thread structure for the running thread. */
@@ -176,7 +187,11 @@ thread_print_stats (void) {
    The code provided sets the new thread's `priority' member to
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
+
+// 스레드 id 자료형
+// 스레드 생성해서 tid_t 형태의 tid를 리턴한다
 tid_t
+// 스레드 이름, 우선순위, 스레드가 실행할 함수, 함수에 전달할 보조 인자
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t;
@@ -185,11 +200,14 @@ thread_create (const char *name, int priority,
 	ASSERT (function != NULL);
 
 	/* Allocate thread. */
+	// 스레드 할당 + 생성
 	t = palloc_get_page (PAL_ZERO);
+	// 실패했으면 에러 리턴
 	if (t == NULL)
 		return TID_ERROR;
 
 	/* Initialize thread. */
+	// 스레드 이름, 우선순위, tid 초기화
 	init_thread (t, name, priority);
 	tid = t->tid = allocate_tid ();
 
@@ -207,8 +225,137 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	// 스레드 id를 반환
 	return tid;
 }
+
+// 로컬틱 넣고, state 변경하고, sleep_list에 넣고, 스케줄러 호출하기
+void thread_sleep(int64_t ticks) {
+
+	// 현재 스레드 담을 포인터
+	struct thread *curThread;
+	// 인터럽트 레벨 담을 변수
+	enum intr_level old_level;
+
+	// 인터럽트 비활성화 + 인터럽트 상태 old_level에 저장
+	old_level = intr_disable();
+	
+	// 현재 스레드 담기
+	curThread = thread_current();
+	
+	// 현재 스레드가 idle이 아닐 경우
+	if(curThread != idle_thread) {
+		
+		// 로컬 틱 설정
+		curThread->localTick = ticks;
+		
+		// localTick 기준으로 정렬되어 삽입
+		list_insert_ordered(&sleep_list, &curThread->elem, compare_thread_ticks, NULL);
+		
+		// state를 blocked로 만들고 스케줄러 호출, 새 스레드에게 CPU 주기
+		thread_block();
+	}
+	// 인터럽트 활성화 + 복구
+	intr_set_level(old_level);
+	
+}
+
+// elem 가져와서, HEAD부터 TAIL까지 localTick을 비교해서 있으면 remove하고 ready에 넣어주기
+// size가 1이면 while문 들어가지 않기
+void thread_awake(void) {
+
+	// sleep_list가 비어 있으면 바로 return
+	if(list_empty(&sleep_list)) {
+		return;
+	}
+
+	// 스레드 저장할 포인터
+	struct thread *t;
+
+	// sleep_list HEAD 가지고 오기
+	struct list_elem *e;
+	e = list_begin(&sleep_list);
+
+	// 스레드 가지고 오기
+	t = list_entry(e, struct thread, elem);
+
+	// 인터럽트 비활성화
+	enum intr_level old_level;
+	old_level = intr_disable();
+
+	// system tick 가지고 오기
+	int64_t systemTick = timer_ticks();
+	
+	// sleep_list 크기가 1개라면 1번만 비교하기
+	if(list_size(&sleep_list) == (size_t)1) {
+		
+		// localTick이 systemTick 과 같거나 이미 지났을 경우 깨우기
+		if(t->localTick <= systemTick) {
+
+			// 스레드 상태 ready로 바꿔주기
+			t->status = THREAD_READY;
+
+			// sleep_list에서 지워주기
+			list_remove(e);
+
+
+			// ready_list에 넣어주기
+			list_insert_ordered(&ready_list, e, compare_thread_ticks, NULL);
+
+		}
+	}
+	// 요소가 2개 이상일 경우
+	else{
+		// 정렬해놨으니까 HEAD만 보면서, system tick보다 큰 값 나오면 break
+		while(true) {
+			
+			// localTick이 systemTick 과 같거나 이미 지났을 경우 깨우기
+			if(t->localTick <= systemTick) {
+				
+				// 스레드 상태 ready로 바꿔주기
+				t->status = THREAD_READY;
+				
+				// sleep_list에서 지워주기
+				list_remove(e);
+				
+
+				// ready_list에 넣어주기
+				list_insert_ordered(&ready_list, e, compare_thread_ticks, NULL);
+				
+			}
+
+			// HEAD의 localTick이 systemTick보다 한 번이라도 클 경우 break
+			else {
+				break;
+			}
+			
+			// 다음 요소 가져오기, 깨웠든 안깨웠든 sleep_list 끝까지 돌아야 함
+			e = list_next(e);
+			
+			// 다음 요소가 NULL일 경우 while문 종료
+			if(e == NULL) {
+				break;
+			}
+			else {
+				// 스레드 가져오기
+				t = list_entry(e, struct thread, elem);
+			}
+		}
+	}
+	intr_set_level(old_level);
+}
+
+// list_insert_ordered를 위한 구현
+bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+
+	if (thread_a -> localTick < thread_b -> localTick) {
+		return true;
+	}
+	else return false;
+}
+
 
 /* Puts the current thread to sleep.  It will not be scheduled
    again until awoken by thread_unblock().
@@ -216,12 +363,19 @@ thread_create (const char *name, int priority,
    This function must be called with interrupts turned off.  It
    is usually a better idea to use one of the synchronization
    primitives in synch.h. */
+// 스레드 상태 blocked으로 만들기 + 스케줄러 호출
+// 이 함수는 인터럽트를 끄고 호출해야 함
+// 동기화 메커니즘을 사용하는 것이 좋을 거라고 한다
 void
 thread_block (void) {
+	
 	ASSERT (!intr_context ());
 	ASSERT (intr_get_level () == INTR_OFF);
+
 	thread_current ()->status = THREAD_BLOCKED;
+	
 	schedule ();
+	
 }
 
 /* Transitions a blocked thread T to the ready-to-run state.
@@ -232,6 +386,8 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+// 스레드 blocked에서 ready list로 넣고 state Ready로 바꿔주기
+// 인터럽트 알아서 멈춰줌
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -540,17 +696,20 @@ do_schedule(int status) {
 
 static void
 schedule (void) {
+	
 	struct thread *curr = running_thread ();
 	struct thread *next = next_thread_to_run ();
-
+	
 	ASSERT (intr_get_level () == INTR_OFF);
 	ASSERT (curr->status != THREAD_RUNNING);
 	ASSERT (is_thread (next));
 	/* Mark us as running. */
 	next->status = THREAD_RUNNING;
+	
 
 	/* Start new time slice. */
 	thread_ticks = 0;
+	
 
 #ifdef USERPROG
 	/* Activate the new address space. */
@@ -565,14 +724,18 @@ schedule (void) {
 		   currently used by the stack.
 		   The real destruction logic will be called at the beginning of the
 		   schedule(). */
+		   
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread) {
+			
 			ASSERT (curr != next);
 			list_push_back (&destruction_req, &curr->elem);
+			
 		}
 
 		/* Before switching the thread, we first save the information
 		 * of current running. */
 		thread_launch (next);
+		
 	}
 }
 

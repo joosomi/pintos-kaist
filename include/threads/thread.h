@@ -91,6 +91,7 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+	int64_t localTick;					// 로컬 틱 필드 추가
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
@@ -125,6 +126,11 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
+void thread_awake(void);
+// thread_sleep 전방 선언
+void thread_sleep(int64_t ticks);
+// compare_thread_ticks 전방 선언
+bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
