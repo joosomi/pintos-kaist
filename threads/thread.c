@@ -28,6 +28,9 @@
    that are ready to run but not actually running. */
 static struct list ready_list;
 
+/*sleep_list: blocked state thread*/
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -109,6 +112,7 @@ thread_init (void) {
 	lock_init (&tid_lock);
 	list_init (&ready_list);
 	list_init (&destruction_req);
+	list_init(&sleep_list);
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -587,4 +591,38 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+void thread_sleep(int64_t ticks) {
+	struct thread *cur;
+
+	enum intr_level old_level;
+	old_level = intr_disable();
+
+	cur = thread_current();
+
+	ASSERT(cur != idle_thread);
+
+	cur->wakeup = ticks;
+	list_push_back(&sleep_list, &cur->elem);
+	thread_block();
+
+	intr_set_level(old_level);
+}
+
+
+void thread_awake(int64_t ticks){
+	struct list_elem *e = list_begin(&sleep_list);
+
+	while (e != list_end(&sleep_list)) {
+		struct thread *t = list_entry(e, struct thread, elem);
+
+		if (t->wakeup <= ticks) {
+			e = list_remove(e);
+			thread_unblock(t);
+		}
+		else {
+			e = list_next(e);
+		}
+	}
 }
