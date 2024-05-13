@@ -593,6 +593,8 @@ allocate_tid (void) {
 	return tid;
 }
 
+//sleep해줄 쓰레드 -> sleep_list에 추가
+// thread를 block 상태로 만들어줌
 void thread_sleep(int64_t ticks) {
 	struct thread *cur;
 
@@ -604,25 +606,50 @@ void thread_sleep(int64_t ticks) {
 	ASSERT(cur != idle_thread);
 
 	cur->wakeup = ticks;
-	list_push_back(&sleep_list, &cur->elem);
+	// list_push_back(&sleep_list, &cur->elem);
+	//sleep_list에 정렬하여서 insert
+	list_insert_ordered(&sleep_list, &cur->elem, compare_thread_ticks, NULL);
 	thread_block();
-
+	
 	intr_set_level(old_level);
 }
 
-
+//blocked 상태인 쓰레드를 꺠워준다.
 void thread_awake(int64_t ticks){
+	enum intr_level old_level;
+
+	old_level = intr_disable();  // 인터럽트 비활성화
+
 	struct list_elem *e = list_begin(&sleep_list);
 
 	while (e != list_end(&sleep_list)) {
 		struct thread *t = list_entry(e, struct thread, elem);
+		// e를 인자로 e가 포함된 thread의 포인터 반환
 
+		//만약 쓰레드가 깰 시간이 되었다면 
+		//sleep_list에서 쓰레드 제거하고 Unblock()
 		if (t->wakeup <= ticks) {
 			e = list_remove(e);
 			thread_unblock(t);
 		}
+		//깰 시간이 되지 않았다면 다음 쓰레드를 깨우려고 함
 		else {
 			e = list_next(e);
 		}
 	}
+	
+	intr_set_level(old_level); //이전 인터럽트로 복원
+}
+
+
+//첫 번째 쓰레드
+// thread - wakeup 값 비교
+bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+
+	if (thread_a ->wakeup < thread_b ->wakeup) {
+		return true;
+	}
+	else return false;
 }
