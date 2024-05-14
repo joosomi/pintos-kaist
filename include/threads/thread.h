@@ -94,6 +94,7 @@ struct thread {
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+	int64_t wakeup;    					/*깨어나야 할 tick, 시간(local ticks)*/
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
@@ -108,6 +109,11 @@ struct thread {
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
 };
+
+void thread_sleep(int64_t ticks);
+void thread_awake(int64_t ticks);
+bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.

@@ -211,6 +211,11 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	/*compare the priorities of the currently running thread
+	and the newly inserted one. Yield the CPU if the newly arriving thread has higher priority*/
+	preempt_thread();
+
+
 	return tid;
 }
 
@@ -244,7 +249,10 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+
+	// list_push_back (&ready_list, &t->elem);
+	list_insert_ordered(&ready_list, &t->elem, compare_thread_priority, NULL);
+
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -307,7 +315,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, compare_thread_priority, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -607,7 +615,8 @@ void thread_sleep(int64_t ticks) {
 
 	cur->wakeup = ticks;
 	// list_push_back(&sleep_list, &cur->elem);
-	//sleep_list에 정렬하여서 insert
+
+	//sleep_list wakeup 기준으로 정렬하여서 insert하기
 	list_insert_ordered(&sleep_list, &cur->elem, compare_thread_ticks, NULL);
 	thread_block();
 	
@@ -631,6 +640,7 @@ void thread_awake(int64_t ticks){
 		if (t->wakeup <= ticks) {
 			e = list_remove(e);
 			thread_unblock(t);
+			preempt_thread(); //unblock() 해주면 정렬해서 ready_list insert됨 -> 우선순위 비교해서 실행중인 쓰레드 yield or 
 		}
 		//깰 시간이 되지 않았다면 다음 쓰레드를 깨우려고 함
 		else {
@@ -642,8 +652,8 @@ void thread_awake(int64_t ticks){
 }
 
 
-//첫 번째 쓰레드
 // thread - wakeup 값 비교
+// 첫번째 쓰레드의 Wakeup이 더 작을 때 return true
 bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
 	struct thread *thread_a = list_entry(a, struct thread, elem);
 	struct thread *thread_b = list_entry(b, struct thread, elem);
@@ -652,4 +662,32 @@ bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, 
 		return true;
 	}
 	else return false;
+}
+
+bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem); 
+
+	if (thread_a->priority > thread_b->priority) {
+		return true;
+	}
+	else return false;
+}
+
+/**/
+void preempt_thread(void) {
+	struct thread *cur = thread_current();
+
+	if (cur == idle_thread){
+		return;
+	}
+	if (list_empty(&ready_list)){
+		return;
+	}
+
+	struct thread *ready_thread = list_entry(list_begin(&ready_list), struct thread, elem);
+
+	if (cur->priority < ready_thread->priority){
+		thread_yield(); //현재 실행중인 쓰레드 yield
+	}	
 }

@@ -93,8 +93,13 @@ timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+
+	if (timer_elapsed(start) < ticks){
+		thread_sleep(start + ticks); 
+		//현재 OS의 시간 + 재우고 싶은 시간 => thread_sleep(깨어나야 할 시각)
+	}
+// 	while (timer_elapsed (start) < ticks)
+// 		thread_yield ();
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -121,11 +126,13 @@ timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* Timer interrupt handler. */
+/* Timer interrupt handler. 
+매 틱마다 쓰레드를 꺠워야할지 재워야할 지 체크하고  awake()*/
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	thread_awake(ticks); 
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
