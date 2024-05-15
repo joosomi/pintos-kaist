@@ -131,6 +131,7 @@ void thread_awake(void);
 void thread_sleep(int64_t ticks);
 // compare_thread_ticks 전방 선언
 bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
@@ -138,6 +139,8 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+// 현재 스레드의 우선순위와 ready_list HEAD의 우선순위를 비교하여 필요 시 yield하는 함수
+void thread_preemption(void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
