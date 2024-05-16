@@ -90,10 +90,18 @@ struct thread {
   enum thread_status status; /* Thread state. */
   char name[16];             /* Name (for debugging purposes). */
   int priority;              /* Priority. */
-  int64_t wakeup_ticks;      /* added for project.1 */
-
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
+
+  /* ----------- added for project.1-1 ----------- */
+  int64_t wakeup_ticks;
+
+  /* ----------- added for project.1-2 ----------- */
+  unsigned initial_priority; /* 상속 받기전 origin_priority */
+  struct lock *wait_on_lock; /* 현재 쓰레드가 대기중인 lock */
+  struct list donations;     /* priority를 상속해준 기부자(thread) */
+  struct list_elem donation_elem; /* struct donations list를 위한 elem */
+  /* --------------------------------------------- */
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
@@ -111,13 +119,20 @@ struct thread {
 
 /* ----------- added for Project.1 ----------- */
 
+/* Alarm Clock */
 bool is_idle_thread(struct thread *t);
-
 void thread_set_wakeup_ticks(struct thread *t, int64_t ticks);
-
 void thread_sleep(int64_t ticks);
 void thread_check_awake(int64_t ticks);
 
+/* ------------------------------------------- */
+
+/* ----------- added for Project.1-2 ----------- */
+
+bool priority_ascending_sort(const struct list_elem *a,
+                             const struct list_elem *b, void *aux);
+void preempt_schedule(void);
+void print_priority(struct list *list);
 /* ------------------------------------------- */
 
 /* If false (default), use round-robin scheduler.
