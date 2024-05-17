@@ -213,7 +213,12 @@ thread_create (const char *name, int priority,
 
 	/*compare the priorities of the currently running thread
 	and the newly inserted one. Yield the CPU if the newly arriving thread has higher priority*/
+	//현재 실행 중인 쓰레드와 새로 create된 쓰레드의 우선순위 비교 -> 새 쓰레드의 우선순위가 더 높으면 현재 쓰레드 yield, 새 쓰레드에게 제어권 넘김
 	preempt_thread();
+	
+	// if (thread_get_priority() < priority){
+	// 	thread_yield();
+	// }
 
 
 	return tid;
@@ -251,6 +256,8 @@ thread_unblock (struct thread *t) {
 	ASSERT (t->status == THREAD_BLOCKED);
 
 	// list_push_back (&ready_list, &t->elem);
+
+	//우선순위에 따라 쓰레드 정렬 
 	list_insert_ordered(&ready_list, &t->elem, compare_thread_priority, NULL);
 
 	t->status = THREAD_READY;
@@ -321,9 +328,15 @@ thread_yield (void) {
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
+/* revoke_priority()의 순서> */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	// thread_current ()->priority = new_priority;
+	//>>>priority => init_priority로 변경
+	thread_current() -> init_priority = new_priority;
+	revoke_priority();
+	preempt_thread(); //현재 쓰레드의 우선순위를 변경한다면 ready_list에서 우선순위가 가장 높은 쓰레드와 비교해서 선점할지 말지 여부를 결정해야 함. 
+	
 }
 
 /* Returns the current thread's priority. */
@@ -421,6 +434,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+	
+	/*priority scheduling을 위한 initialization*/
+	t->init_priority = priority;
+	t->wait_on_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -537,6 +555,7 @@ thread_launch (struct thread *th) {
  * This function modify current thread's status to status and then
  * finds another thread to run and switches to it.
  * It's not safe to call printf() in the schedule(). */
+/*do_schedule(): 현재 실행 중인 쓰레드의 상태를 변경, 다음에 실행할 쓰레드를 찾아 Switching*/
 static void
 do_schedule(int status) {
 	ASSERT (intr_get_level () == INTR_OFF);
@@ -550,6 +569,7 @@ do_schedule(int status) {
 	schedule ();
 }
 
+/*schedule(): 실제로 다음에 실행할 쓰레드 선택, 현재 쓰레드에서 새 쓰레드로의 Switching*/
 static void
 schedule (void) {
 	struct thread *curr = running_thread ();
@@ -573,7 +593,7 @@ schedule (void) {
 		/* If the thread we switched from is dying, destroy its struct
 		   thread. This must happen late so that thread_exit() doesn't
 		   pull out the rug under itself.
-		   We just queuing the page free reqeust here because the page is
+		   We just queuing the page free reqeust here because the page is 
 		   currently used by the stack.
 		   The real destruction logic will be called at the beginning of the
 		   schedule(). */
@@ -623,6 +643,7 @@ void thread_sleep(int64_t ticks) {
 	intr_set_level(old_level);
 }
 
+//일정 시간이 지나 깨어나야 하는 쓰레드들을 sleep_list에서 제거하고 ready 상태로 
 //blocked 상태인 쓰레드를 꺠워준다.
 void thread_awake(int64_t ticks){
 	enum intr_level old_level;
@@ -640,7 +661,9 @@ void thread_awake(int64_t ticks){
 		if (t->wakeup <= ticks) {
 			e = list_remove(e);
 			thread_unblock(t);
-			preempt_thread(); //unblock() 해주면 정렬해서 ready_list insert됨 -> 우선순위 비교해서 실행중인 쓰레드 yield or 
+			
+			//*>> But 빈번한 타이머 인터럽트 -> 시스템 오버헤드가 불필요하게 증가할 수 있음
+			// preempt_thread(); //unblock() 해주면 정렬해서 ready_list insert됨 -> 우선순위 비교해서 실행중인 쓰레드 yield or not
 		}
 		//깰 시간이 되지 않았다면 다음 쓰레드를 깨우려고 함
 		else {
@@ -650,6 +673,13 @@ void thread_awake(int64_t ticks){
 	
 	intr_set_level(old_level); //이전 인터럽트로 복원
 }
+
+
+/* list_insert_ordered()
+- compare_thread_ticks: thread_a의 wakeup < thread_b의 wakeup => wakeup이 작을수록 더 빨리 깨어나야 하는 쓰레드
+=> wakeup 값이 작은 쓰레드부터 큰 쓰레드 순으로 정렬됨
+- compare_thread_priority: thread_a의 priority > thread_b priority 
+=> 우선순위가 높은 쓰레드가 먼저 실행되어야 함. 리스트를 우선순위가 높은 쓰레드부터 낮은 쓰레드로 정렬해야 함.*/
 
 
 // thread - wakeup 값 비교
@@ -664,6 +694,8 @@ bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, 
 	else return false;
 }
 
+//쓰레드 간의 우선순위 비교
+//thread_A의 우선순위가 더 높다면 True 반환
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
 	struct thread *thread_a = list_entry(a, struct thread, elem);
 	struct thread *thread_b = list_entry(b, struct thread, elem); 
@@ -674,7 +706,11 @@ bool compare_thread_priority(const struct list_elem *a, const struct list_elem *
 	else return false;
 }
 
-/**/
+/*현재 실행 중인 쓰레드와 Ready_list(정렬됐음)의
+모든 쓰레드들 중에 가장 우선순위가 높은 쓰레드와 우선순위 비교 해서 yield 결정
+thread_create, 
+set_thread_priority
+sema_up 할 때 사용*/
 void preempt_thread(void) {
 	struct thread *cur = thread_current();
 
@@ -685,9 +721,15 @@ void preempt_thread(void) {
 		return;
 	}
 
-	struct thread *ready_thread = list_entry(list_begin(&ready_list), struct thread, elem);
+	// list_begin -> list_front로 수정함
+	// list_begin(): 리스트의 실제 요소에 접근하기 위한 것이 아니라 순회하기 위한 시작점으로 사용(리스트가 비어있을 때도 사용 가능함)
+	// list_front(): 리스트가 비어있지 않을 때만 사용. 리스트의 첫 번째 실제 요소에 접근할 목적으로 사용됨.
+	struct thread *ready_thread = list_entry(list_front(&ready_list), struct thread, elem);
 
+	//현재 쓰레드가 우선순위가 더 낮다면 yield
 	if (cur->priority < ready_thread->priority){
 		thread_yield(); //현재 실행중인 쓰레드 yield
 	}	
 }
+
+
