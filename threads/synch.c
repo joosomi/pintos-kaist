@@ -72,23 +72,15 @@ static void donate_priority(void) {
 
     curr_t = curr_t->wait_on_lock->holder;
 
+    /* TODO
+			 정렬된 순서대로 들어가기에 비교를 할 필요가 없다는데
+			 아무리봐도 아닌거같은데 생각해보자... */
     if (curr_t->priority < prev_priority) {
       curr_t->priority = prev_priority;
       prev_priority = curr_t->priority;
     }
 
     depth++;
-
-    //   if (lock->holder->priority < curr_t->priority) {
-    //     lock->holder->priority = curr_t->priority;
-    //     list_push_back(&lock->holder->donations, &curr_t->donation_elem);
-    //   }
-
-    //   curr_t = lock->holder;
-    //   lock = curr_t->wait_on_lock;
-
-    //   depth++;
-    // }
   }
 }
 /**
@@ -194,6 +186,7 @@ void sema_down(struct semaphore *sema) {
     list_insert_ordered(&sema->waiters, &thread_current()->elem,
                         (list_less_func *)&priority_ascending_sort, NULL);
     thread_block();
+    /* ------------------------------------- */
   }
 
   preempt_schedule();
@@ -319,7 +312,16 @@ void lock_acquire(struct lock *lock) {
   if (lock->holder != NULL) {
     cur_t->wait_on_lock = lock;
     list_push_back(&(lock->holder->donations), &(cur_t->donation_elem));
-    donate_priority();
+
+    /* ---------- added for Project.1-2 ---------- */
+
+    // donate_priority();
+
+    /* ---------- added for Project.1-3 ---------- */
+
+    if (!thread_mlfqs) donate_priority();
+
+    /* ------------------------------------------- */
   }
 
   sema_down(&lock->semaphore);
@@ -356,7 +358,16 @@ void lock_release(struct lock *lock) {
   ASSERT(lock_held_by_current_thread(lock));
 
   remove_donor_lock(lock);
-  update_priority_donation();
+
+  /* ---------- added for Project.1-2 ---------- */
+
+  // update_priority_donation();
+
+  /* ---------- added for Project.1-3 ---------- */
+
+  if (!thread_mlfqs) update_priority_donation();
+
+  /* ------------------------------------------- */
 
   lock->holder = NULL;
   sema_up(&lock->semaphore);

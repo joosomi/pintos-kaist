@@ -87,8 +87,23 @@ int64_t timer_ticks(void) {
   return t;
 }
 
-/* Returns the number of timer ticks elapsed since THEN, which
-   should be a value once returned by timer_ticks(). */
+/**
+ * @brief 특정 시점 이후의 경과된 tick 수 반환
+ * 
+ * @param then 특정 시점
+ * 
+ * @example timer_sleep() 함수에서 start에 현재 tick을 저장하고
+ *          while문으로 timer_elapsed(start) < ticks로 loop를
+ *          돌게한다.
+ *          예를들어, start에 100을 저장하고 200까지 sleep하라고 가정하자
+ *          while문을 돌면서 timner_elapsed(start)는 100, 101, 102, 
+ *          103, 104, ... 199, 200까지 증가하게 된다. 
+ *          d이후 200(ticks)가 되면 loop를 빠져나오게 된다.
+ *          ⛔️ start로 선언한 지역변수는 변하지않는다.
+ * 
+ * @note Returns the number of timer ticks elapsed since THEN, which
+ *       should be a value once returned by timer_ticks().
+*/
 int64_t timer_elapsed(int64_t then) { return timer_ticks() - then; }
 
 /**
@@ -135,8 +150,29 @@ void timer_print_stats(void) {
 static void timer_interrupt(struct intr_frame *args UNUSED) {
   ticks++;
   thread_tick();
-  /* ---------- added for Project.1 ---------- */
+
+  /* ---------- added for Project.1-1 ---------- */
+
   thread_check_awake(ticks);
+
+  /* ---------- added for Project.1-3 ---------- */
+
+  if (!thread_mlfqs) return;
+
+  /* each ticks excute */
+  thread_increase_recent_cpu_of_running();
+
+  /* every 1 second */
+  if (ticks % TIMER_FREQ == 0) {
+    thread_update_load_avg();
+    thread_update_recent_cpu_of_all();
+  }
+
+  /* every 4 ticks */
+  if (ticks % 4 == 0) {
+    thread_all_update_priority();
+  }
+
   /*------------------------------------------*/
 }
 
