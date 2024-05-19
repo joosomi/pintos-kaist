@@ -58,7 +58,7 @@ sema_init (struct semaphore *sema, unsigned value) {
    thread will probably turn interrupts back on. This is
    sema_down function. */
 // 
-//세마포어의 값이 양수가 될 때까지 대기 -> 그 값을 감소시킴. 
+//세마포어의 값이 양수가 될 때까지 대기 -> 양수되면 그 값을 감소시킴. 
 void
 sema_down (struct semaphore *sema) {
 	enum intr_level old_level;
@@ -210,6 +210,11 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!lock_held_by_current_thread (lock)); //현재 쓰레드가 이미 해당 락을 보유하고 있지 않는지 확인
 	//락을 이미 보유한 쓰레드가 다시 시도할 경우 데드락 발생시킬 수 있음. 
 
+	if (thread_mlfqs) {
+		sema_down(&lock->semaphore);
+		lock->holder = thread_current();
+		return ;
+	}
 
 	//해당 Lock의 holder가 이미 존재한다면(다른 쓰레드가 Lock을 보유하고 있다면)
 	if (lock->holder != NULL) {
@@ -221,7 +226,6 @@ lock_acquire (struct lock *lock) {
 
 		donate_priority(); // priority donation: lock을 보유한 쓰레드의 우선순위를 현재 쓰레드의 우선순위로 설정
 	}
-
 	sema_down (&lock->semaphore); 
 	//lock에 연결된 세마포어의 값이 0보다 크면 1감소, 그렇지 않으면 대기 상태로 전환
 	//lock을 획득하기 위해 대기하거나 즉시 획득하는 역할 -> Lock 획득시 -1(공유 자원에 대한 접근 권한 획득했음을 의미) 
@@ -263,11 +267,15 @@ void
 lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock)); //lock을 해제하기 전에 현재 쓰레드가 Lock의 소유자인지 확인
-
-	remove_with_lock(lock);
-	revoke_priority();
-
 	lock->holder = NULL; //lock의 소유자를 NULL로
+	
+	
+
+	if(!thread_mlfqs){
+		remove_with_lock(lock);
+		revoke_priority();
+	}
+
 	sema_up (&lock->semaphore); /*세마포어의 값 1증가. -> 
 	만약 세마포어의 값이 0이하였다면, 하나 이상의 쓰레드가 lock을 얻기 위해 대기 중이었음.
 	-> 하나의 쓰레드가 깨어나서 lock을 얻을 수 있게 됨 */
@@ -373,7 +381,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 
 	if (!list_empty (&cond->waiters)){
 		list_sort(&cond->waiters, compare_sema_priority, NULL);
-		
+
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
 	}
