@@ -7,7 +7,6 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-
 /* See [8254] for hardware details of the 8254 timer chip. */
 
 #if TIMER_FREQ < 19
@@ -128,11 +127,33 @@ timer_print_stats (void) {
 
 /* Timer interrupt handler. 
 매 틱마다 쓰레드를 꺠워야할지 재워야할 지 체크하고  awake()*/
+
+/* mlfqs 스케줄러일 경우
+timer_interrupt 가 발생할때 마다 recent_cpu 1증가,
+1초마다 load_avg, recent_cpu, priority 계산,
+매 4tick마다 priority 계산 */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
-	thread_awake(ticks); 
+
+	//mlfqs 스케줄러일 때
+	if (thread_mlfqs){
+		mlfqs_increase_recent_cpu();  //매 틱마다 recent_cpu + 1 증가
+
+		//TIMER_FREQ = 1초 동안의 틱 수 
+			//ticks % TIMER_FREQ == 0 => 정확히 1초마다 True
+		if (ticks % TIMER_FREQ == 0) {
+			mlfqs_load_avg();
+			mlfqs_recalc_recent_cpu();
+		}
+
+		if (ticks % 4 == 0){
+			mlfqs_recalc_priority();
+		}
+
+	}
+	thread_awake(ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

@@ -102,6 +102,12 @@ struct thread {
 	struct lock *wait_on_lock; 				/*해당 쓰레드가 대기하고 있는 lock 자료구조의 주소 저장*/
 	struct list_elem d_elem;                /*donation element - Multiple donation 고려*/
 
+	/*advanced scheduler*/
+	int nice;
+	int recent_cpu;
+	
+	struct list_elem all_elem; 				/*List element for all element*/
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -122,6 +128,16 @@ bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, 
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 void preempt_thread(void);
+
+void mlfqs_priority(struct thread *t );
+int mlfqs_calc_decay(void);
+void mlfqs_recent_cpu(struct thread *t);
+void mlfqs_load_avg(void);
+void mlfqs_increase_recent_cpu(void);
+void mlfqs_recalculate(void);
+void mlfqs_recalc_recent_cpu(void);
+void mlfqs_recalc_priority(void);
+
 
 void donate_priority(void);
 
