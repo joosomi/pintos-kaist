@@ -228,7 +228,7 @@ lock_acquire (struct lock *lock) {
 	}
 	sema_down (&lock->semaphore); 
 	//lock에 연결된 세마포어의 값이 0보다 크면 1감소, 그렇지 않으면 대기 상태로 전환
-	//lock을 획득하기 위해 대기하거나 즉시 획득하는 역할 -> Lock 획득시 -1(공유 자원에 대한 접근 권한 획득했음을 의미) 
+	//lock을 획득하기 위해 대기하거나 즉시 획득하는 역할 -> Lock 획득시 1--(공유 자원에 대한 접근 권한 획득했음을 의미) 
 
 	//현재 쓰레드가 lock을 획득하게 되면, 
 	thread_current()->wait_on_lock = NULL; //현재 쓰레드가 더 이상 이 lock을 기다리고 있지 않음 표시
@@ -516,12 +516,13 @@ void revoke_priority(void){
 	//기부 받은 우선순위가 있다면 
 	if (!list_empty(&cur->donations)){
 		//donations list에서 가장 큰 우선순위 값
-		struct thread *donation_max_priority = list_entry(list_begin(&cur->donations), struct thread, d_elem);
+		//list_begin에서 list_front로 수정
+		struct thread *donation_max_priority = list_entry(list_front(&cur->donations), struct thread, d_elem);
 
 		//기부 받은 우선순위와 현재 쓰레드의 우선순위를 비교해서, 
 		//기부 받은 우선순위 값이 더 크다면 우선순위 업데이트
-		if (donation_max_priority->priority > cur->priority){
-			cur->priority = donation_max_priority->priority;
-		}
+		// if (donation_max_priority->priority > cur->priority){
+		cur->priority = donation_max_priority->priority;
+		// }
 	}
 }
