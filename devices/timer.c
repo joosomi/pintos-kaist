@@ -165,12 +165,12 @@ static void timer_interrupt(struct intr_frame *args UNUSED) {
   /* every 1 second */
   if (ticks % TIMER_FREQ == 0) {
     thread_update_load_avg();
-    thread_update_recent_cpu_of_all();
+    thread_foreach(thread_update_recent_cpu, NULL);
   }
 
   /* every 4 ticks */
   if (ticks % 4 == 0) {
-    thread_all_update_priority();
+    thread_foreach(thread_set_priority_mlfqs, NULL);
   }
 
   /*------------------------------------------*/

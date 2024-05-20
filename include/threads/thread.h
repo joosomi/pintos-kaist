@@ -43,16 +43,15 @@ extern int load_avg;
 
 #define RECENT_CPU_DEFAULT 0
 
-/* 
-  format : 17.14 fixed-point
+/* ------- fixed_point(고정 소수점) 산술 macro -------
+  format : 17.14
+
   n : integer
   F : 1 << 14
   x : Fixed-Point
-  y : Fixed-Point
-*/
-#define F 16384
+  y : Fixed-Point  */
 
-/* ------- fixed_point(고정 소수점) 산술 macro ------- */
+#define F 16384
 
 /**
  * @brief 정수를 fixed-point로 변환
@@ -210,23 +209,25 @@ void thread_set_wakeup_ticks(struct thread *t, int64_t ticks);
 
 /* ----------- added for Project.1-2 ----------- */
 
-bool priority_ascending_sort(const struct list_elem *a,
-                             const struct list_elem *b, void *aux);
-void preempt_schedule(void);
+bool cmp_ascending_priority(const struct list_elem *a,
+                            const struct list_elem *b, void *aux);
+void check_preempt(void);
 
 /* ----------- added for Project.1-3 ----------- */
 
-void thread_all_update_priority(void);
-void thread_set_priority_mlfqs(struct thread *t);
+typedef void (*all_thread_list_func)(struct thread *t, void *aux);
+
+void thread_set_priority_mlfqs(struct thread *t, void *aux UNUSED);
 
 int thread_calc_load_avg(int load_avg, int ready_thread_cnt);
 void thread_update_load_avg(void);
 
 int thread_calc_decay(void);
 
-void thread_update_recent_cpu_of_all(void);
 void thread_increase_recent_cpu_of_running(void);
-void thread_update_recent_cpu(struct thread *t);
+void thread_update_recent_cpu(struct thread *t, void *aux UNUSED);
+
+void thread_foreach(all_thread_list_func exec, void *aux UNUSED);
 
 /* -------------------------------------------- */
 
