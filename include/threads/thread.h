@@ -28,6 +28,14 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+// NICE, RECENT CPU, LOAD AVG 기본값
+#define NICE_DEFAULT 0
+#define RECENT_CPU_DEFAULT 0
+#define LOAD_AVG_DEFAULT 0
+
+// load_avg 선언
+int load_avg;
+
 /* A kernel thread or user process.
  *
  * Each thread structure is stored in its own 4 kB page.  The
@@ -91,7 +99,15 @@ struct thread {
 	enum thread_status status;          /* Thread state. */
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
+
 	int64_t localTick;					// 로컬 틱 필드 추가
+	int originPriority;					// priority 복구를 위한, 원래 priority
+	struct lock *waitOnLock;			// 현재 기다리는 lock
+	struct list donation;				// priority 를 빌려준 스레드 리스트
+	struct list_elem donationElem;		// donation 리스트를 관리하기 위한 element
+
+	int nice;							// nice 값 저장할 필드
+	int recent_cpu;						// recent_cpu 값 저장할 필드
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
@@ -126,12 +142,15 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
-void thread_awake(void);
+void thread_awake(int64_t ticks);
 // thread_sleep 전방 선언
 void thread_sleep(int64_t ticks);
 // compare_thread_ticks 전방 선언
 bool compare_thread_ticks(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+// compare_thread_priority 전방 선언
 bool compare_thread_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+// compare_thread_donate_priority 전방 선언
+bool compare_thread_donate_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
@@ -141,6 +160,12 @@ void thread_exit (void) NO_RETURN;
 void thread_yield (void);
 // 현재 스레드의 우선순위와 ready_list HEAD의 우선순위를 비교하여 필요 시 yield하는 함수
 void thread_preemption(void);
+// priority를 nested 하게 donate 하는 함수
+void donate_priority(void);
+// release에서 donation 리스트 요소 제거하는 함수
+void remove_with_lock(struct lock *lock);
+// release에서 priority 재설정 하는 함수
+void refresh_priority(void);
 
 int thread_get_priority (void);
 void thread_set_priority (int);

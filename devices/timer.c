@@ -149,7 +149,7 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	thread_tick ();
 	
 	// 모든 tick마다 실행되어, wakeup할 스레드를 고르는 코드
-	thread_awake();
+	thread_awake(ticks);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

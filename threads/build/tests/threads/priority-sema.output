@@ -8,11 +8,30 @@ Calibrating timer...  209,510,400 loops/s.
 Boot complete.
 Executing 'priority-sema':
 (priority-sema) begin
-Kernel PANIC at ../../lib/kernel/list.c:270 in list_front(): assertion `!list_empty (list)' failed.
-Call stack: 0x800421353c 0x8004213e9e 0x80042073b8 0x8004207397 0x80042191d7 0x8004216978 0x8004206636 0x8004206783 0x8004206120.
-The `backtrace' program can make call stacks useful.
-Read "Backtraces" in the "Debugging Tools" chapter
-of the Pintos documentation for more information.
-Timer: 21 ticks
-Thread: 0 idle ticks, 21 kernel ticks, 0 user ticks
-Console: 
+(priority-sema) Thread priority 30 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 29 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 28 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 27 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 26 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 25 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 24 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 23 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 22 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) Thread priority 21 woke up.
+(priority-sema) Back in main thread.
+(priority-sema) end
+Execution of 'priority-sema' complete.
+Timer: 23 ticks
+Thread: 0 idle ticks, 23 kernel ticks, 0 user ticks
+Console: 1232 characters output
+Keyboard: 0 keys pressed
+Powering off...
