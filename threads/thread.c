@@ -127,7 +127,7 @@ thread_init (void) {
 	list_init(&sleep_list);
 	list_init(&all_list);
 
-	load_avg = 0;
+	load_avg = LOAD_AVG_DEFAULT;
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -644,9 +644,8 @@ do_schedule(int status) {
 	ASSERT (thread_current()->status == THREAD_RUNNING);
 	while (!list_empty (&destruction_req)) {
 		struct thread *victim =
-			list_entry (list_pop_front (&destruction_req), struct thread, elem);
-			list_remove(&victim->all_elem);
-		palloc_free_page(victim);
+			list_entry (list_pop_front (&destruction_req), struct thread, elem); //소멸되어야 하는 쓰레드들이 포함된 victim List
+			list_remove(&victim->all_elem); //all_list에서 제거
 	}
 	thread_current ()->status = status;
 	schedule ();
