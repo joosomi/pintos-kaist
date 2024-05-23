@@ -49,6 +49,13 @@ void parse_argument(char *command_line, char *argv[], int *argc) {
   *argc = i;
 }
 
+/**
+ * @brief command line으로 부터 받은 arg(인수)를 user stack에 저장한다.
+ * 
+ * @param argv 인수 배열
+ * @param argc 인수의 개수
+ * @param _if 현재 thread의 intr_frame
+*/
 void push_argment_stack(char *argv[], int argc, struct intr_frame *_if) {
   int i, j;
   int total_length = 0;
@@ -158,6 +165,17 @@ static void initd(void *f_name) {
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
+/**
+ * @brief 자식 프로세스(부모와 같은 )를 생성하고 tid(thread id)를 반환한다.
+ * 
+ * @param name child process name
+ * @param if_ parent intr_frame (부모 프로세스의 register 정보를 저장하기 위해)
+ * 
+ * @return tid_t new process's thread id
+ * 
+ * @note Clones the current process as `name`. Returns the new process's
+ *       thread id, or TID_ERROR if the thread cannot be created.
+*/
 tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
   /* Clone current thread to new thread.*/
   return thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
@@ -194,10 +212,22 @@ static bool duplicate_pte(uint64_t *pte, void *va, void *aux) {
 }
 #endif
 
-/* A thread function that copies parent's execution context.
- * Hint) parent->tf does not hold the userland context of the process.
+/**
+ * @brief 부모의 실행 컨텍스트를 복사하는 thread function
+ * 
+ * @param aux parent thread (struct thread*)
+ * 
+ * @note A thread function that copies parent's execution context.
+ * 
+ *       > 부모의 실행 컨텍스트를 복사하는 thread function이다.
+ *        
+ *       Hint) parent->tf does not hold the userland context of the process.        
  *       That is, you are required to pass second argument of process_fork to
- *       this function. */
+ *       this function
+ * 
+ *       >  Hint) parent->tf는 프로세스의 userland context를 보유하지 않습니다.
+ *       >  즉, process_fork()의 두 번째 인수를 이 함수에 전달해야합니다.
+*/
 static void __do_fork(void *aux) {
   struct intr_frame if_;
   struct thread *parent = (struct thread *)aux;
@@ -209,7 +239,9 @@ static void __do_fork(void *aux) {
   /* 1. Read the cpu context to local stack. */
   memcpy(&if_, parent_if, sizeof(struct intr_frame));
 
-  /* 2. Duplicate PT */
+  /* 2. Duplicate PT
+      - 자식프로세스의 page table을 생성하고
+      - 부모의 page table을 복사한다 ref.1) */
   current->pml4 = pml4_create();
   if (current->pml4 == NULL) goto error;
 
@@ -218,6 +250,7 @@ static void __do_fork(void *aux) {
   supplemental_page_table_init(&current->spt);
   if (!supplemental_page_table_copy(&current->spt, &parent->spt)) goto error;
 #else
+  /* ref.1) */
   if (!pml4_for_each(parent->pml4, duplicate_pte, parent)) goto error;
 #endif
 
@@ -227,10 +260,13 @@ static void __do_fork(void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
+  /* process를 초기화한다. */
   process_init();
 
-  /* Finally, switch to the newly created process. */
+  /* Finally, switch to the newly created process. 
+     모든 리소스 복사가 성공하면 child process로 context switching */
   if (succ) do_iret(&if_);
+
 error:
   thread_exit();
 }
@@ -295,25 +331,44 @@ int process_exec(void *f_name) {
   NOT_REACHED();
 }
 
-/* Waits for thread TID to die and returns its exit status.  If
- * it was terminated by the kernel (i.e. killed due to an
- * exception), returns -1.  If TID is invalid or if it was not a
- * child of the calling process, or if process_wait() has already
- * been successfully called for the given TID, returns -1
- * immediately, without waiting.
- *
- * This function will be implemented in problem 2-2.  For now, it
- * does nothing. */
+/**
+ * @brief thread가 exit될 때까지 **기다리고(block)** 종료 상태를 반환한다.
+ * 
+ * @note  Waits for thread TID to die and returns its exit status.
+ * 
+ *        >  TID가 종료될 때까지 기다리고 종료 상태를 반환합니다.
+ * 
+ *        If it was terminated by the kernel (i.e. killed due to an
+ *        exception), returns -1.
+ * 
+ *        >  커널에 의해 종료되었으면(즉, 예외로 인해 종료되었으면) -1을 반환합니다.
+ * 
+ *        If TID is invalid or if it was not a child of the calling
+ *        process, or if process_wait() has already been successfully
+ *        called for the given TID, returns -1 immediately, without 
+ *        waiting
+ * 
+ *        >  TID가 유효하지 않거나 호출 프로세스의 자식이 아니거나,
+ *        >  process_wait()가 이미 주어진 TID에 대해 성공적으로 호출되었거나
+ *        >  즉시 -1을 반환하고 기다리지 않습니다. 
+*/
 int process_wait(tid_t child_tid UNUSED) {
-  while (child_tid);
 
   /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+  while (1);
+
   return -1;
 }
 
-/* Exit the process. This function is called by thread_exit (). */
+/**
+ * @brief 프로세스를 종료하고 프로세스의 자원을 정리한다.
+ * 
+ * @note  Exit the process. This function is called by thread_exit().
+ * 
+ *        >  프로세스를 종료한다. 이 함수는 thread_exit()에 의해 호출됩니다.
+*/
 void process_exit(void) {
   struct thread *curr = thread_current();
   /* TODO: Your code goes here.
@@ -324,7 +379,11 @@ void process_exit(void) {
   process_cleanup();
 }
 
-/* Free the current process's resources. */
+/**
+ * @brief 현재 프로세스의 자원을 해제(free)한다.
+ * 
+ * @note  Frees the current process's resources.
+*/
 static void process_cleanup(void) {
   struct thread *curr = thread_current();
 
