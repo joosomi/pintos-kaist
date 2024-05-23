@@ -38,6 +38,14 @@ process_init (void) {
  * before process_create_initd() returns. Returns the initd's
  * thread id, or TID_ERROR if the thread cannot be created.
  * Notice that THIS SHOULD BE CALLED ONCE. */
+
+/*file_name 복사해서 새로운 메모리 영역에 저장,
+file_name을 실행하는 새로운 쓰레드 생성
+-> 쓰레드 ID를 반환하거나 실패시 TID_ERROR return
+
+-> 커맨드 라인이 'echo x y z'가 통째로 file name으로 들어간다. 
+-> 커맨드 라인 인자 분리하는 과정
+*/
 tid_t
 process_create_initd (const char *file_name) {
 	char *fn_copy;
@@ -45,12 +53,24 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0);
-	if (fn_copy == NULL)
+	fn_copy = palloc_get_page (0); //file_name의 복사본 저장 -> 페이지 크기의 메모리 할당
+	
+	if (fn_copy == NULL) 	//메모리 할당에 실패하면 
 		return TID_ERROR;
-	strlcpy (fn_copy, file_name, PGSIZE);
+	strlcpy (fn_copy, file_name, PGSIZE); //fn_copy에 file_name 복사
+
+	/*Argument Passing
+	file_name을 받아와서 null 기준으로 문자열 파싱
+
+	strtok_r(): 지정된 문자를 기준으로 문자열을 자름*/
+	char *parsing;
+	strtok_r(file_name, " ", &parsing);
 
 	/* Create a new thread to execute FILE_NAME. */
+	/*
+	tid : 쓰레드의 id -> 시스템에서 각 쓰레드를 고유하게 식별하는 값
+		initd: 새로 생성된 쓰레드가 실행할 함수, 전달될 인자: fn_copy
+	*/
 	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
@@ -159,11 +179,19 @@ error:
 }
 
 /* Switch the current execution context to the f_name.
- * Returns -1 on fail. */
+ * Returns -1 on fail. 
+
+ f_name: 인자는 커맨드 라인 -> 다시 parsing 해주어야 함 
+ 새 프로세스를 실행하는 역할
+ */
 int
 process_exec (void *f_name) {
 	char *file_name = f_name;
 	bool success;
+
+	/*Project2. Argument Parsing*/
+	char file_name_copy[128]; //원본을 복사할 배열의 크기는 최대 128 byte
+	memcpy(file_name_copy, file_name, strlen(file_name) + 1); //원본 문자열을 memcpy로 복사하고 1을 더해줘야 함(\0)
 
 	/* We cannot use the intr_frame in the thread structure.
 	 * This is because when current thread rescheduled,
@@ -177,17 +205,21 @@ process_exec (void *f_name) {
 	process_cleanup ();
 
 	/* And then load the binary */
-	success = load (file_name, &_if);
+	success = load (file_name_copy, &_if);
 
-	/* If load failed, quit. */
+	/* If load failed, quit.
+	로드에 실패한 경우, 파일에 할당된 메모리 페이지 해제 */
 	palloc_free_page (file_name);
 	if (!success)
 		return -1;
+
+	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
 
 	/* Start switched process. */
 	do_iret (&_if);
 	NOT_REACHED ();
 }
+
 
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -204,6 +236,9 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+	for (int i = 0; i < 100000000; i++)
+    {
+	}
 	return -1;
 }
 
@@ -320,6 +355,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
  * Stores the executable's entry point into *RIP
  * and its initial stack pointer into *RSP.
  * Returns true if successful, false otherwise. */
+
+/* if_ : interrupt frame를 가리키는 포인터 */
 static bool
 load (const char *file_name, struct intr_frame *if_) {
 	struct thread *t = thread_current ();
@@ -330,19 +367,34 @@ load (const char *file_name, struct intr_frame *if_) {
 	int i;
 
 	/* Allocate and activate page directory. */
-	t->pml4 = pml4_create ();
+	t->pml4 = pml4_create (); /*페이지 디렉토리 생성*/
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
 
+	/*----------------------Argument Parsing-----------------------------*/
+	char *token; //현재 토큰을 저장할 포인터
+	char *save_ptr;  //strtok_r 함수가 내부적으로 사용하는 상태 정보를 저장할 포인터
+	char *argv[128]; // 
+	uint64_t argc = 0; //토큰 개수 
+
+	for (token = strtok_r(file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
+		argv[argc++] = token; // argv에 parsing된 현재 토큰 저장
+		
+	}
+
+
+	/*-------------------------------------------------------------------*/
+
 	/* Open executable file. */
-	file = filesys_open (file_name);
+	file = filesys_open (file_name); /*프로그램 파일 open*/
 	if (file == NULL) {
 		printf ("load: %s: open failed\n", file_name);
 		goto done;
 	}
 
 	/* Read and verify executable header. */
+	/*ELF 파일의 헤더 정보를 읽어와 저장*/
 	if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
 			|| memcmp (ehdr.e_ident, "\177ELF\2\1\1", 7)
 			|| ehdr.e_type != 2
@@ -357,7 +409,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* Read program headers. */
 	file_ofs = ehdr.e_phoff;
 	for (i = 0; i < ehdr.e_phnum; i++) {
-		struct Phdr phdr;
+		struct Phdr phdr; /*배치 정보를 읽어와 저장*/
 
 		if (file_ofs < 0 || file_ofs > file_length (file))
 			goto done;
@@ -408,6 +460,7 @@ load (const char *file_name, struct intr_frame *if_) {
 	}
 
 	/* Set up stack. */
+	/*스택 초기화*/
 	if (!setup_stack (if_))
 		goto done;
 
@@ -416,7 +469,18 @@ load (const char *file_name, struct intr_frame *if_) {
 
 	/* TODO: Your code goes here.
 	 * TODO: Implement argument passing (see project2/argument_passing.html). */
-
+	/*-----------------------------------------------------------*/	
+	//rsp -> stack pointer
+	//rdi: first argument, rsi: second argument 
+	argument_stack(argv, argc, if_);
+	
+	printf("argc: %d\n", argc);
+	// argv 배열의 원소들 출력
+    printf("argv elements:\n");
+    for (uint64_t i = 0; i <= argc; i++) {
+        printf("argv[%d]: %s\n", i, argv[i]);
+    }
+	/*-----------------------------------------------------------*/	
 	success = true;
 
 done:
@@ -425,6 +489,71 @@ done:
 	return success;
 }
 
+/*-----------------------------------------------------------------*/
+
+/*argv배열에 저장된 인자들을 스택에 역순으로 삽입,
+이후 각 인자의 주소를 스택에 삽입, 마지막으로 리턴 주소 설정
+argv: 인자 문자열 배열, argc: 인자의 개수, if_: interrupt frame 구조체*/
+
+void argument_stack(char **argv, int argc, struct intr_frame *if_){
+
+	char *arg_address[128]; /*각 인자의 주소를 저장할 배열*/
+
+	//스택은 높은 주소에서 낮은 주소로 쌓이기 때문에 역순으로 삽입
+	//argc -1 부터 0까지 역순으로 반복
+	for (int i = argc - 1 ; i >= 0 ; i--) {
+		int argv_len = strlen(argv[i]); //현재 인자의 길이(스택에 복사할 떄 필요한 공간을 확보하기 위함) 
+
+		if_->rsp = if_->rsp - (argv_len + 1); 
+		//현재 스택 포인터 = 스택 포인터를 [ 인자의 길이 + 1(NULL 문자)] 만큼 감소시킴
+
+		memcpy(if_->rsp, argv[i], argv_len + 1 ); //인자를 스택에 복사 
+		
+		arg_address[i] = if_->rsp; //복사된 인자의 시작 주소를 arg_address[i]에 저장
+	}
+
+	//8 byte Padding
+	//스택 포인터가 8바이트로 정렬되지 않은 경우 while문으로 계속 패딩 
+	while(if_->rsp % 8 != 0) {
+
+		if_->rsp--; //스택 포인터 1 byte 감소 -> 스택의 높은 주소에서 낮은 주소로 이동하는 것
+		
+		*(uint8_t *)if_->rsp = 0; //현재 스택 포인터가 가리키는 위치에 0 저장
+	}
+
+	
+	//주소값 Insert
+	//if_->rsp: stack pointer, 현재 스택의 최상단 
+
+	// argc부터 1씩 감소시키며 0까지 반복
+	for (int i = argc; i >=0; i--){
+
+		if_->rsp = if_->rsp - 8; //각 반복마다 스택 포인터를 8바이트 감소시킴
+		 
+		if (i==argc) {
+			memset(if_->rsp, 0, sizeof(char **)); 
+			//sizeof(char **): 포인터의 크기 
+			//i==argc일 때 => NULL 포인터로 채움(끝 표시)
+		}
+
+		//실제 인자값의 주소 복사
+		else {
+			//memcpy 사용하여 arg_address[i]의 주소를 if_->rsp위치에 복사 
+			memcpy(if_->rsp, &arg_address[i], sizeof(char **)); //실제 인자의 주소를 스택에 복사 - 8바이트를 복사
+			/* sizeof(char *)와 같은 결과 but  이중 포인터를 달*/
+		}
+	}
+
+	//모든 인자가 스택에 설정된 후에 스택 포인터를 다시 8바이트 감소시키고
+	//fake return address 를 스택에 저장
+	if_->rsp = if_->rsp - 8; 
+	memset(if_->rsp, 0, sizeof(void *));
+
+
+	if_->R.rdi = argc;
+	if_->R.rsi = if_->rsp + 8; 
+}
+/*-----------------------------------------------------------------*/
 
 /* Checks whether PHDR describes a valid, loadable segment in
  * FILE and returns true if so, false otherwise. */

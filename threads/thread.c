@@ -600,13 +600,13 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
   /* Allocate thread.
      thread 구조체를 위한 메모리 할당 */
-  new_t = palloc_get_page(PAL_ZERO);
-  if (new_t == NULL) return TID_ERROR;
+  new_t = palloc_get_page(PAL_ZERO); /*페이지 할당*/
+  if (new_t == NULL) return TID_ERROR; 
 
   /* Initialize thread.
      아래에서 unblock 하는 이유는 init_thread에서 BLOCKED으로 초기화 */
-  init_thread(new_t, name, priority);
-  tid = new_t->tid = allocate_tid();
+  init_thread(new_t, name, priority); /*thread 구조체 초기화*/
+  tid = new_t->tid = allocate_tid(); /*tid 할당*/
 
   /* Call the kernel_thread if it scheduled.
    * Note) rdi is 1st argument, and rsi is 2nd argument. */
