@@ -63,15 +63,15 @@ process_create_initd (const char *file_name) {
 	file_name을 받아와서 null 기준으로 문자열 파싱
 
 	strtok_r(): 지정된 문자를 기준으로 문자열을 자름*/
-	char *parsing;
-	strtok_r(file_name, " ", &parsing);
+	char *token, parsing;
+	token = strtok_r(file_name, " ", &parsing);
 
 	/* Create a new thread to execute FILE_NAME. */
 	/*
 	tid : 쓰레드의 id -> 시스템에서 각 쓰레드를 고유하게 식별하는 값
 		initd: 새로 생성된 쓰레드가 실행할 함수, 전달될 인자: fn_copy
 	*/
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (token, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
@@ -96,9 +96,40 @@ initd (void *f_name) {
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	struct thread *parent = thread_current();
+
+	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
+
+	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, parent);
+
+	if (tid == TID_ERROR) {
+		return TID_ERROR;
+	}
+
+	struct thread *child = get_child_process(tid);
+	sema_down(&child->fork_sema);
+
+	if (child->exit_status == TID_ERROR) {
+		return TID_ERROR;
+	} 
+	return tid;
 }
+
+
+struct thread *get_child_process (int pid){
+	struct thread *cur = thread_current();
+
+	struct list *child_list = &cur->child_list;
+	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
+		struct thread *t = list_entry(e, struct thread, child_elem);
+
+		if (t->tid == pid){
+			return t;
+		}
+	}
+	return NULL;
+}
+
 
 #ifndef VM
 /* Duplicate the parent's address space by passing this function to the
@@ -145,8 +176,12 @@ __do_fork (void *aux) {
 	struct intr_frame *parent_if;
 	bool succ = true;
 
+	parent_if = &parent->parent_if;
+
 	/* 1. Read the cpu context to local stack. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
+
+	if_.R.rax = 0; //자식 프로세스의 리턴값은 0
 
 	/* 2. Duplicate PT */
 	current->pml4 = pml4_create();
@@ -169,13 +204,31 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
-	process_init ();
+	if (parent->next_fd_idx == FDT_COUNT_LIMIT)
+		goto error;
+
+	
+	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++){
+		struct file *file = parent->fdt[fd];
+
+		if (file == NULL)
+			continue;
+
+		current->fdt[fd] = file_duplicate(file);
+	}
+
+	current ->next_fd_idx = parent->next_fd_idx;
+	sema_up(&current->fork_sema);
+
+	// process_init ();
 
 	/* Finally, switch to the newly created process. */
 	if (succ)
 		do_iret (&if_);
 error:
-	thread_exit ();
+	sema_up(&parent->fork_sema);
+	exit(TID_ERROR);
+	// thread_exit ();
 }
 
 /* Switch the current execution context to the f_name.
@@ -236,11 +289,41 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-	for (int i = 0; i < 100000000; i++)
-    {
+	// for (int i = 0; i < 100000000; i++)
+    // {
+	// }
+	// return -1;
+
+	struct thread *child = get_child_process(child_tid);
+
+	if (child == NULL) {
+		return -1;
 	}
-	return -1;
+
+	sema_down(&child-> wait_sema);
+
+	int exit_status = child->exit_status;
+	list_remove(&child->child_elem);
+
+	sema_up(&child->free_sema);
+
+	return exit_status;
 }
+
+// struct thread *get_child_by_pid (int pid) {
+// 	struct thread *cur = thread_current();
+
+// 	struct list *child_list = &cur->child_list;
+// 	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
+// 		struct thread *t = list_entry(e, struct thread, child_elem);
+
+// 		if (t->tid == pid) {
+// 			return t;
+// 		}
+
+// 		return NULL;
+// 	}
+// }
 
 /* Exit the process. This function is called by thread_exit (). 
 - 프로세스가 종룔될 때 메모리 누수를 방지하기 위해 프로세스에 열린 모든 파일을 닫음
@@ -261,6 +344,10 @@ process_exit (void) {
 	file_close(cur->running);
 
 	process_cleanup ();
+
+	sema_up(&cur->wait_sema);
+	sema_down(&cur->free_sema);
+	
 }
 
 /* Free the current process's resources. */
@@ -480,6 +567,9 @@ load (const char *file_name, struct intr_frame *if_) {
 	//rsp -> stack pointer
 	//rdi: first argument, rsi: second argument 
 	argument_stack(argv, argc, if_);
+
+	// t->running = file; 
+	// file_deny_write(file); 
 	
 	// printf("argc: %d\n", argc);
 	// // argv 배열의 원소들 출력

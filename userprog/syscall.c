@@ -11,7 +11,8 @@
 #include "threads/palloc.h"
 #include "filesys/file.h"
 #include "devices/input.h"
-
+#include "filesys/filesys.h"
+#include "stdio.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -29,6 +30,7 @@ void seek (int fd, unsigned position);
 unsigned tell (int fd);
 int read (int fd, void *buffer, unsigned size);
 int write (int fd, const void *buffer, unsigned size);
+tid_t fork (const char *thread_name, struct intr_frame *f );
 
 int add_file_to_fdt(const char *file);
 static struct file *find_file_by_fd(int fd);
@@ -91,15 +93,15 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_EXIT:
 			exit(f->R.rdi);
 			break;
-		// case SYS_FORK:
-		// 	fork(f->R.rdi);
-			// break;
+		case SYS_FORK:
+			f->R.rax = fork(f->R.rdi, f);
+			break;
 		case SYS_EXEC:	
 			exec(f->R.rdi);
 			break;
 		// case SYS_WAIT:
 		// 	wait(f->R.rdi);
-		//	break;
+		// 	break;
 		case SYS_CREATE:
 			f->R.rax = create(f->R.rdi, f->R.rsi);
 			break;
@@ -176,10 +178,11 @@ void exit (int status){
 - initial_size: 생성할 파일의 크기*/
 bool create (const char *file, unsigned initial_size) {
 	/*주소 값이 사용자 영역에서 사용하는 주소 값인지 확인*/
+	lock_acquire(&filesys_lock);
 	check_address(file);
 
 	bool success =filesys_create(file, initial_size);
-		
+	lock_release(&filesys_lock);
 	return success;
 }
 
@@ -225,11 +228,16 @@ int exec (const char *file_name){
 
 /*-----------------------------------------------------------*/
 /*wait: */
-// int wait (pid_t pid){}
+int wait (tid_t tid){
+	return process_wait(tid);
+}
 
 
 /*fork: */
-// pid_t fork (const char *thread_name){}
+tid_t fork (const char *thread_name, struct intr_frame *f ){
+	check_address(thread_name);
+	return process_fork(thread_name, f);
+}
 
 
 /*-----------------------------------------------------------*/
@@ -242,7 +250,7 @@ int add_file_to_fdt(const char *file){
 	int fd_idx = cur->next_fd_idx; 
 
 	//FDT에서 사용 가능한 인덱스 찾기 
-	while (cur->fdt[fd_idx] != NULL && fd_idx < FDT_COUNT_LIMIT){
+	while (fdt[fd_idx] != NULL && fd_idx < FDT_COUNT_LIMIT){
 		fd_idx++;
 	}
 
@@ -266,10 +274,13 @@ int add_file_to_fdt(const char *file){
 int open (const char *file){
 	check_address(file);
 
+	lock_acquire(&filesys_lock);
+
 	struct file *open_file = filesys_open(file); //file open
 
 	//파일 열기 실패시 return -1
 	if (open_file == NULL) {
+		lock_release(&filesys_lock);
 		return -1;
 	}
 
@@ -278,9 +289,9 @@ int open (const char *file){
 	//fd == -1: 파일을 열 수 없는 경우
 	if (fd == -1) {
 		file_close(open_file);
-		return -1; 
+		// return -1; 
 	}
-
+	lock_release(&filesys_lock);
 	return fd;
 }
 
@@ -292,7 +303,8 @@ int filesize (int fd){
 	struct file *open_file = find_file_by_fd(fd);
 
 	if (open_file == NULL) {
-		return -1;
+		return ;
+		// return -1;
 	}
 
 	return file_length(open_file);
@@ -304,8 +316,8 @@ int filesize (int fd){
 static struct file *find_file_by_fd(int fd) {
 	struct thread *cur = thread_current();
 
-	if (fd < 0 || fd >= FDT_COUNT_LIMIT){
-		return -1;
+	if (fd < STDIN_FILENO || fd >= FDT_COUNT_LIMIT){
+		return NULL;
 	}
 
 	return cur->fdt[fd];
@@ -431,7 +443,6 @@ void seek (int fd, unsigned position){
 unsigned tell (int fd){
 	struct file *tell_file = find_file_by_fd(fd);
 
-
 	if (tell_file != NULL) {
 		return file_tell(tell_file);
 	}
@@ -444,16 +455,18 @@ unsigned tell (int fd){
 void close (int fd){
 	/*해당 파일 디스크립터에 해당하는 파일을 닫음
 	파일 디스크립터 엔트리 초기화*/
+
+	//표준 입출력은 닫지 않음.
+	if (fd < 2){
+		return;
+	}
+
 	struct file *file = find_file_by_fd(fd);
 	if(file== NULL){
 		return;
 	}
 
 	remove_file_from_fdt(fd);
-
-	if (fd<=2 || file <=2){
-		return;
-	}
 
 	file_close(file);
 }
@@ -465,8 +478,9 @@ void remove_file_from_fdt(int fd) {
 	struct thread *cur = thread_current();
 	struct file **fdt = cur->fdt;
 
-	if (fd < 2 || fd >= FDT_COUNT_LIMIT) {
-		return NULL;
+	if (fd < STDIN_FILENO || fd >= FDT_COUNT_LIMIT) {
+		return ;
+		// return NULL;
 	}
 
 	fdt[fd] = NULL;

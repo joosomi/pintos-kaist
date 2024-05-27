@@ -89,9 +89,9 @@ extern int load_avg;
 
 /* ------------ added for Project.2  ------------ */
 
-#define FDT_PAGES 3 
+#define FDT_PAGES 3 //fdt 할당시 필요한 페이지 개수
 
-#define FDT_COUNT_LIMIT FDT_PAGES *(1<<9) //프로세스가 동시에 열 수 있는 최대 파일 디스크립터 수 
+#define FDT_COUNT_LIMIT FDT_PAGES* (1<<9) //프로세스가 동시에 열 수 있는 최대 파일 디스크립터 수 
 
 
 /* ----------------------------------------------- */
@@ -191,8 +191,7 @@ struct thread {
   struct list_elem all_thread_elem;
 
   /* ----------- added for project.2 ------------ */
-  struct file **fdt; //file descriptor table 
-  int next_fd_idx;
+
 
   int exit_status; //프로세스의 종료 유무
 
@@ -204,6 +203,7 @@ struct thread {
   // struct sempahore exit_sema;
   struct semaphore wait_sema;
   struct semaphore free_sema;
+  struct semaphore fork_sema;
 
   // int stdin_count; 
   // int stdout_count;
@@ -214,6 +214,8 @@ struct thread {
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint64_t *pml4; /* Page map level 4 */
+  struct file **fdt; //file descriptor table 
+  int next_fd_idx;
 #endif
 #ifdef VM
   /* Table for whole virtual memory owned by thread. */

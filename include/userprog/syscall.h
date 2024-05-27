@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 
 struct lock filesys_lock;
@@ -22,6 +23,7 @@ void seek (int fd, unsigned position);
 unsigned tell (int fd);
 int read (int fd, void *buffer, unsigned size);
 int write (int fd, const void *buffer, unsigned size);
+tid_t fork (const char *thread_name, struct intr_frame *f);
 
 int add_file_to_fdt(const char *file);
 static struct file *find_file_by_fd(int fd);

@@ -608,6 +608,10 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   init_thread(new_t, name, priority); /*thread 구조체 초기화*/
   tid = new_t->tid = allocate_tid(); /*tid 할당*/
 
+  /* ------------------------------------------------- */
+  struct thread *cur = thread_current();
+  list_push_back(&cur->child_list, &new_t->child_elem);
+
   /* Call the kernel_thread if it scheduled.
    * Note) rdi is 1st argument, and rsi is 2nd argument. */
   new_t->tf.rip = (uintptr_t)kernel_thread;
@@ -644,9 +648,9 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
     return TID_ERROR;
   }
 
-  new_t->next_fd_idx = 2 ;
-  new_t->fdt[0] = 0; //stdin 
-  new_t->fdt[1] = 1; //stdout
+  new_t->next_fd_idx = 2 ; //0: stdin, 1:
+  new_t->fdt[0] = 1; //stdin -> dummy value 
+  new_t->fdt[1] = 2; //stdout -> dummy value
 
   return tid;
 }
@@ -926,9 +930,13 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   /* ------------added for Project.2 ----------- */
   t->exit_status = 0;
   t->next_fd_idx = 2;
-  // sema_init(&t->load_sema, 0);
-  // sema_init(&t->exit_sema, 0);
-  // sema_init(&t->wait_sema, 0);
+
+  t->running = NULL;
+
+  sema_init(&t->wait_sema, 0);
+  sema_init(&t->free_sema, 0);
+  sema_init(&t->fork_sema, 0);
+
   list_init(&t->child_list);
 }
 
