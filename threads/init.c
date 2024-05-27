@@ -237,6 +237,7 @@ parse_options (char **argv) {
 /* Runs the task specified in ARGV[1]. */
 static void
 run_task (char **argv) {
+	//argv[0] = run, argv[1]부터 
 	const char *task = argv[1];
 
 	printf ("Executing '%s':\n", task);

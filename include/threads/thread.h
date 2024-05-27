@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -85,6 +86,13 @@ extern int load_avg;
 
 #define DIV_FP(x, y) (((int64_t)x) * F / y)
 #define DIV_FP_AND_INT(x, n) (x / n)
+
+/* ------------ added for Project.2  ------------ */
+
+#define FDT_PAGES 3 
+
+#define FDT_COUNT_LIMIT FDT_PAGES *(1<<9) //프로세스가 동시에 열 수 있는 최대 파일 디스크립터 수 
+
 
 /* ----------------------------------------------- */
 
@@ -182,6 +190,25 @@ struct thread {
   /* 모든 쓰레드를 관리하는 all_thread_list를 위한 elem */;
   struct list_elem all_thread_elem;
 
+  /* ----------- added for project.2 ------------ */
+  struct file **fdt; //file descriptor table 
+  int next_fd_idx;
+
+  int exit_status; //프로세스의 종료 유무
+
+  struct intr_frame parent_if; 
+  struct list child_list;
+  struct list_elem child_elem;
+
+  // struct semaphore load_sema;
+  // struct sempahore exit_sema;
+  struct semaphore wait_sema;
+  struct semaphore free_sema;
+
+  // int stdin_count; 
+  // int stdout_count;
+
+  struct file *running ;
   /* --------------------------------------------- */
 
 #ifdef USERPROG

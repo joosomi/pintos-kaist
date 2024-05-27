@@ -639,6 +639,15 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
   /* ------------------------------------------------- */
 
+  new_t->fdt = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+  if (new_t->fdt == NULL){
+    return TID_ERROR;
+  }
+
+  new_t->next_fd_idx = 2 ;
+  new_t->fdt[0] = 0; //stdin 
+  new_t->fdt[1] = 1; //stdout
+
   return tid;
 }
 
@@ -914,7 +923,13 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->nice = NICE_DEFAULT;
   t->recent_cpu = RECENT_CPU_DEFAULT;
 
-  /* ------------------------------------------- */
+  /* ------------added for Project.2 ----------- */
+  t->exit_status = 0;
+  t->next_fd_idx = 2;
+  // sema_init(&t->load_sema, 0);
+  // sema_init(&t->exit_sema, 0);
+  // sema_init(&t->wait_sema, 0);
+  list_init(&t->child_list);
 }
 
 /**

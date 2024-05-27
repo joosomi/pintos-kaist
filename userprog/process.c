@@ -53,7 +53,7 @@ process_create_initd (const char *file_name) {
 
 	/* Make a copy of FILE_NAME.
 	 * Otherwise there's a race between the caller and load(). */
-	fn_copy = palloc_get_page (0); //file_name의 복사본 저장 -> 페이지 크기의 메모리 할당
+	fn_copy = palloc_get_page (0); //file_name의 복사본 저장 -> 페이지 크기의 메모리 할당 - 할당된 페이지 0으로 초기화
 	
 	if (fn_copy == NULL) 	//메모리 할당에 실패하면 
 		return TID_ERROR;
@@ -213,10 +213,10 @@ process_exec (void *f_name) {
 	if (!success)
 		return -1;
 
-	hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+	// hex_dump(_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
 
 	/* Start switched process. */
-	do_iret (&_if);
+	do_iret (&_if); //인터럽트 프레임에 저장된 상태 복원
 	NOT_REACHED ();
 }
 
@@ -242,14 +242,23 @@ process_wait (tid_t child_tid UNUSED) {
 	return -1;
 }
 
-/* Exit the process. This function is called by thread_exit (). */
+/* Exit the process. This function is called by thread_exit (). 
+- 프로세스가 종룔될 때 메모리 누수를 방지하기 위해 프로세스에 열린 모든 파일을 닫음
+- File descriptor Table 메모리 해제*/
 void
 process_exit (void) {
-	struct thread *curr = thread_current ();
-	/* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
+	struct thread *cur = thread_current ();
+	/* 프로세스에 열린 모든 파일을 닫음
+	파일 디스크립터 테이블의 최댓값을 이용해 파일 디스크립터의 최소값인 2가 될 때까지 파일을 닫음
+	파일 디스크립터 테이블 메모리 해제 */
+	
+	for (int i = 0; i < FDT_COUNT_LIMIT; i++){
+		close(i);
+	}
+
+	palloc_free_multiple(cur->fdt, FDT_PAGES);
+
+	file_close(cur->running);
 
 	process_cleanup ();
 }
@@ -382,8 +391,6 @@ load (const char *file_name, struct intr_frame *if_) {
 		argv[argc++] = token; // argv에 parsing된 현재 토큰 저장
 		
 	}
-
-
 	/*-------------------------------------------------------------------*/
 
 	/* Open executable file. */
@@ -474,12 +481,12 @@ load (const char *file_name, struct intr_frame *if_) {
 	//rdi: first argument, rsi: second argument 
 	argument_stack(argv, argc, if_);
 	
-	printf("argc: %d\n", argc);
-	// argv 배열의 원소들 출력
-    printf("argv elements:\n");
-    for (uint64_t i = 0; i <= argc; i++) {
-        printf("argv[%d]: %s\n", i, argv[i]);
-    }
+	// printf("argc: %d\n", argc);
+	// // argv 배열의 원소들 출력
+    // printf("argv elements:\n");
+    // for (uint64_t i = 0; i <= argc; i++) {
+    //     printf("argv[%d]: %s\n", i, argv[i]);
+    // }
 	/*-----------------------------------------------------------*/	
 	success = true;
 
