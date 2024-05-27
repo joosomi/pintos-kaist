@@ -9,6 +9,16 @@
 #include "vm/vm.h"
 #endif
 
+/* --------------- added for PROJECT.2-1 --------------- */
+
+#include "threads/synch.h"
+
+/* --------------- added for PROJECT.2-2 --------------- */
+
+#include "filesys/file.h"
+
+/* ----------------------------------------------------- */
+
 /* States in a thread's life cycle. */
 enum thread_status {
   THREAD_RUNNING, /* Running thread. */
@@ -154,18 +164,18 @@ struct thread {
   /* Shared between thread.c and synch.c. */
   struct list_elem elem; /* List element. */
 
-  /* ----------- added for project.1-1 ----------- */
+  /* ----------- added for PROJECT.1-1 ----------- */
 
   int64_t wakeup_ticks; /* sleep 상태에서 깨어날 시간 */
 
-  /* ----------- added for project.1-2 ----------- */
+  /* ----------- added for PROJECT.1-2 ----------- */
 
   unsigned initial_priority; /* 상속 받기전 origin_priority */
   struct lock *wait_on_lock; /* 현재 쓰레드가 대기중인 lock */
   struct list donations;     /* priority를 상속해준 기부자(thread) */
   struct list_elem donation_elem; /* struct donations list를 위한 elem */
 
-  /* ----------- added for project.1-3 ----------- */
+  /* ----------- added for PROJECT.1-3 ----------- */
 
   /**
    * @brief CPU사용을 얼마나 양보할지 표현하는 정수
@@ -182,12 +192,31 @@ struct thread {
   /* 모든 쓰레드를 관리하는 all_thread_list를 위한 elem */;
   struct list_elem all_thread_elem;
 
-  /* --------------------------------------------- */
+  /* --------------- added for PRJECT.2-1  --------------- */
 
-#ifdef USERPROG
+  int exit_status;         /* 쓰레드의 종료 상태 */
+  int success_load_status; /* load 성공 여부 */
+
+  /* for file manipulation */
+  struct file **fdt; /* file descriptor table */
+  int next_fd;       /* 테이블에 등록된 fd + 1
+                           즉, 다음에 저장될 fd의 값을 의미한다 */
+
+  struct semaphore exec_lock; /* exec의 성공 여부를 기다리는 lock */
+  struct semaphore exit_lock; /* 자식 쓰레드의 종료를 기다리는 lock */
+
+  /* For Process hierarchy */
+  struct list child_list;      /* 자식 쓰레드들을 관리하는 list */
+  struct list_elem child_elem; /* 자식 쓰레드들을 관리하는 list_elem */
+
+  struct thread *parent; /* 부모 쓰레드 */
+
+  /* ----------------------------------------------------- */
+
+  // #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint64_t *pml4; /* Page map level 4 */
-#endif
+// #endif
 #ifdef VM
   /* Table for whole virtual memory owned by thread. */
   struct supplemental_page_table spt;

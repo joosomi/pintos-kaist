@@ -40,6 +40,10 @@ void parse_argument(char *command_line, char *argv[], int *argc) {
   char *token, *save_ptr = NULL;
   int i = 0;
 
+  ASSERT(command_line != NULL);
+  ASSERT(argv != NULL);
+  ASSERT(argc != NULL);
+
   for (token = strtok_r(command_line, " ", &save_ptr); token != NULL;
        token = strtok_r(NULL, " ", &save_ptr)) {
     argv[i++] = token;
@@ -59,7 +63,7 @@ void parse_argument(char *command_line, char *argv[], int *argc) {
 void push_argment_stack(char *argv[], int argc, struct intr_frame *_if) {
   int i, j;
   int total_length = 0;
-  char *arg_addr[argc];
+  char *arg_addr[(LOADER_ARGS_LEN / 2) + 1];
 
   /* 인수(args)를 스택에 저장한다. */
   for (i = argc - 1; i >= 0; i--) {
@@ -98,6 +102,71 @@ void push_argment_stack(char *argv[], int argc, struct intr_frame *_if) {
   _if->R.rsi = _if->rsp + sizeof(void *);
 }
 
+/* --------------- added for PROJECT.2-2 --------------- */
+
+/**
+ * @brief 파일을 열고 file 구조체를 반환한다.
+ * 
+ * @param file file object pointer
+*/
+int process_add_file(struct file *file) {
+  struct thread *curr_t = thread_current();
+  int fd_idx;
+
+  // ASSERT(file != NULL);
+
+  if (!file) return -1;
+  if (curr_t->next_fd >= 65) return -1; /* file descriptor table full */
+
+  fd_idx = curr_t->next_fd;
+
+  curr_t->fdt[fd_idx] = file;
+  curr_t->next_fd++;
+
+  return fd_idx;
+}
+
+/**
+ * @brief fd에 해당하는 file을 반환한다.
+ * 
+ * @param fd file descriptor
+*/
+struct file *process_get_file(int fd) {
+  struct thread *curr_t = thread_current();
+  struct file *file;
+
+  /* 유효하지 않은 범위내의 fd가 들어왔을때 예외처리 */
+  ASSERT(fd < 65 || fd > 2);
+  ASSERT(fd < curr_t->next_fd);
+
+  file = curr_t->fdt[fd];
+
+  if (file == NULL) return NULL;
+
+  return file;
+}
+
+/**
+ * @brief fd에 해당하는 file을 닫는다.
+ * 
+ * @param fd file descriptor
+*/
+void process_close_file(int fd) {
+  struct thread *curr_t = thread_current();
+  struct file *file;
+
+  /* 유효하지 않은 범위내의 fd가 들어왔을때 예외처리 */
+  ASSERT(fd < 65 || fd > 2);
+
+  file = curr_t->fdt[fd];
+
+  if (file == NULL) return; /* 이미 닫힌 파일이라면 return */
+
+  file_close(file); /* file close */
+
+  curr_t->fdt[fd] = NULL; /* file에 대한 fd 초기화 */
+}
+
 /* ----------------------------------------------------- */
 
 /* General process initializer for initd and other process. */
@@ -134,6 +203,11 @@ tid_t process_create_initd(const char *file_name) {
   fn_copy = palloc_get_page(0);
   if (fn_copy == NULL) return TID_ERROR;
   strlcpy(fn_copy, file_name, PGSIZE);
+
+  /* --------------- added for PROJECT.2-1 --------------- */
+  // command line의 첫번째 토큰을 thread_name으로 저장한다.
+  char *ptr;
+  file_name = strtok_r(file_name, " ", &ptr);
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create(file_name, PRI_DEFAULT, initd, fn_copy);
@@ -314,11 +388,13 @@ int process_exec(void *f_name) {
   /* And then load the binary */
   success = load(argv[0], &_if);
 
-  /* --------------- added for project.2-1 ---------------
-     save token on user stack */
+  /* --------------- added for project.2-1 --------------- */
 
+  /* token(args)를 user Stack에 저장한다. */
   push_argment_stack(argv, argc, &_if);
-  hex_dump((uintptr_t)_if.rsp, _if.rsp, USER_STACK - _if.rsp, true);
+
+  /* 주석을 해제하면 argment가 stack에 들어가있는지 확인할 수 있다.
+  hex_dump((uintptr_t)_if.rsp, _if.rsp, USER_STACK - _if.rsp, true); */
 
   /* ----------------------------------------------------- */
 
@@ -357,7 +433,13 @@ int process_wait(tid_t child_tid UNUSED) {
   /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
-  while (1);
+
+  // tid_t 를 이용해 child process를 찾는다.
+  // caller는 child process가 종료될때까지 기다려야한다.
+  // child process가 종료되면 종료 상태를 반환한다.
+
+  for (size_t i = 0; i < 1000000000; i++) {
+  }
 
   return -1;
 }
@@ -371,10 +453,23 @@ int process_wait(tid_t child_tid UNUSED) {
 */
 void process_exit(void) {
   struct thread *curr = thread_current();
-  /* TODO: Your code goes here.
-	 * TODO: Implement process termination message (see
-	 * TODO: project2/process_termination.html).
-	 * TODO: We recommend you to implement process resource cleanup here. */
+
+  /* --------------- added for PROJECT.2-2 --------------- */
+
+  int max_fd = curr->next_fd;
+  struct file *file;
+
+  for (int fd = 2; fd < max_fd; fd++) {
+    file = process_get_file(fd);
+
+    if (!file) continue;
+
+    process_close_file(fd); /* close_file() && FDT[fd] init */
+  }
+
+  palloc_free_page(curr->fdt); /* deallocate FDT */
+
+  /* ----------------------------------------------------- */
 
   process_cleanup();
 }
@@ -508,7 +603,6 @@ static bool load_segment(struct file *file, off_t ofs, uint8_t *upage,
  * 					user가 사용한 데이터의 시작점인 rsp는 데이터 struct인 intr_frame->rsp에 저장된다.
  * 
  * 					❌ user process Stack의 데이터를 저장하는것이 아니다.
- * 
 */
 static bool load(const char *file_name, struct intr_frame *if_) {
   struct thread *t = thread_current();

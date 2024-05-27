@@ -1,8 +1,8 @@
 #include "threads/thread.h"
 #include <debug.h>
+#include <include/lib/stdio.h> /* added for PROJECT.2-2 (var STD)*/
 #include <random.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <string.h>
 #include "intrinsic.h"
 #include "threads/flags.h"
@@ -471,9 +471,17 @@ void thread_init(void) {
   lock_init(&tid_lock);
 
   list_init(&ready_list);
-  list_init(&sleep_list);
   list_init(&destruction_req);
+
+  /* --------------- added for PROJECT.1-1 --------------- */
+
+  list_init(&sleep_list);
+
+  /* --------------- added for PROJECT.1-3 --------------- */
+
   list_init(&all_thread_list);
+
+  /* ----------------------------------------------------- */
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread();
@@ -619,10 +627,25 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->tf.cs = SEL_KCSEG;
   new_t->tf.eflags = FLAG_IF;
 
-  /* 새로 생성한 쓰레드를 ready_queue에 넣는다.
-     thread_unblock() 이라는 함수 명에 혼동되면 안된다.
-     단순히 thread의 state를 ready로 바꿔주는것 뿐만 아니라
-     ready_list에 넣어주는 역할도 한다. */
+  /* ------------- added for Project.2-2 ------------- */
+
+  /* 512 바이트만큼만 할당하면 되기에 malloc 으로
+    (file ptr (8byte) * entry cnt : 64) 할당하면 됐지만
+    운영체제에선 page단위로 메모리를 할당하기에 조금 낭비가 있더라도
+    이대로 사용하는게 좋다고 판단 */
+  new_t->fdt = palloc_get_page(PAL_ZERO);
+  if (new_t->fdt == NULL) return TID_ERROR; /* 메모리 할당 실패 */
+
+  new_t->fdt[0] = STDIN_FILENO;  /* 표준 입력 stdin */
+  new_t->fdt[1] = STDOUT_FILENO; /* 표준 출력 stdout */
+
+  new_t->next_fd = 2; /* 다음으로 할당될 fd 번호 */
+
+  /* ------------- added for Project.1-1 ------------- */
+
+  /* 새로 생성한 쓰레드를 ready_queue에 넣는다. thread_unblock()
+     이라는 함수 명에 혼동되면 안된다. 단순히 thread의 state를 ready로
+     바꿔주는것 뿐만 아니라 ready_list에 넣어주는 역할도 한다. */
   thread_unblock(new_t);
 
   /* ------------- added for Project.1-3 ------------- */
@@ -759,13 +782,14 @@ void thread_exit(void) {
      We will be destroyed during the call to schedule_tail(). */
   intr_disable();
 
-  /* ------------- added for Project.1-3 ------------- */
+  /* --------------- added for PROJECT.1-3 --------------- */
 
   list_remove(&thread_current()->all_thread_elem);
 
-  /* ------------------------------------------------- */
+  /* ----------------------------------------------------- */
 
   do_schedule(THREAD_DYING);
+
   NOT_REACHED();
 }
 
@@ -899,20 +923,25 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->priority = priority;
   t->magic = THREAD_MAGIC;
 
-  /* ----------- added for Project.1-1 ----------- */
+  /* ----------- added for PROJECT.1-1 ----------- */
 
   t->wakeup_ticks = WAKEUP_TICKS_DEFAULT;
 
-  /* ----------- added for Project.1-2 ----------- */
+  /* ----------- added for PROJECT.1-2 ----------- */
 
   t->initial_priority = priority;
   t->wait_on_lock = NULL;
   list_init(&t->donations);
 
-  /* ----------- added for Project.1-3 ----------- */
+  /* ----------- added for PROJECT.1-3 ----------- */
 
   t->nice = NICE_DEFAULT;
   t->recent_cpu = RECENT_CPU_DEFAULT;
+
+  /* ----------- added for PROJECT.2-1 ----------- */
+
+  list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
+  t->exit_status = 0;        /* 자식 프로세스의 종료 상태 */
 
   /* ------------------------------------------- */
 }
