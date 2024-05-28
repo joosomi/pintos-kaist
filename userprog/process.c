@@ -160,7 +160,7 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	bool writable; //페이지가 쓰기 가능한지 여부
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
-	//만약 va가 커널 주소라면 return true
+	//만약 va가 커널 주소라면 즉시 return true 
 	if (is_kernel_vaddr(va)) {
 		return true;
 	}
@@ -174,7 +174,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
-	newpage = palloc_get_page(PAL_USER);
+	newpage = palloc_get_page(PAL_USER);//자식 프로세스를 위해 새로운 PAL_USER 페이지 할당 
+	//만약 페이지 할당에 실패한다면 false return
 	if (newpage == NULL) {
 		return false ;
 	}
@@ -183,13 +184,15 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
 	memcpy(newpage, parent_page, PGSIZE); //부모의 페이지를 새 페이지로 복사
-	writable = is_writable(pte); //페이지 테이블 엔트리(pte)를 통해서 부모 페이지가 쓰기 가능한지 확인
 
+	// writable = is_writable(pte); //페이지 테이블 엔트리(pte)를 통해서 부모 페이지가 쓰기 가능한지 확인
+	writable = (*pte & PTE_W) != 0;  //비트 연산(&)을 통해 페이지 쓰기가 가능한지 확인
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		palloc_free_page(newpage); //할당한 페이지 해제
 		return false;
 	}
 	return true;

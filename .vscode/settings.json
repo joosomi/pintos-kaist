@@ -3,6 +3,7 @@
     "files.associations": {
         "*.ejs": "html",
         "file.h": "c",
-        "syscall.h": "c"
+        "syscall.h": "c",
+        "thread.h": "c"
     }
 }
