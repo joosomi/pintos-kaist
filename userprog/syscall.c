@@ -192,10 +192,12 @@ bool create (const char *file, unsigned initial_size) {
 - 성공 true, 실패일 경우 false 리턴*/
 bool remove (const char *file){
 	/*주소 값이 사용자 영역에서 사용하는 주소 값인지 확인*/
+	lock_acquire(&filesys_lock);
 	check_address(file);
 
-	if(filesys_remove(file)) return true;
-	else return false;
+	bool success =filesys_remove(file);
+	lock_release(&filesys_lock);
+	return success;
 }
 
 

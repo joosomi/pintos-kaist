@@ -150,30 +150,47 @@ struct thread *get_child_process (int pid){
 #ifndef VM
 /* Duplicate the parent's address space by passing this function to the
  * pml4_for_each. This is only for the project 2. */
+// 부모 프로세스의 주소 공간을 자식 프로세스로 복사하는 기능 
 static bool
 duplicate_pte (uint64_t *pte, void *va, void *aux) {
-	struct thread *current = thread_current ();
+	struct thread *current = thread_current (); //현재 실행 중인 쓰레드
 	struct thread *parent = (struct thread *) aux;
 	void *parent_page;
 	void *newpage;
-	bool writable;
+	bool writable; //페이지가 쓰기 가능한지 여부
 
 	/* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	//만약 va가 커널 주소라면 return true
+	if (is_kernel_vaddr(va)) {
+		return true;
+	}
 
 	/* 2. Resolve VA from the parent's page map level 4. */
-	parent_page = pml4_get_page (parent->pml4, va);
+	parent_page = pml4_get_page (parent->pml4, va); //부모의 pml4에서 va에 해당하는 페이지 가져옴
+	//만약 부모 페이지가 null이면 return false
+	if (parent_page == NULL) {
+		return false;
+	}
 
 	/* 3. TODO: Allocate new PAL_USER page for the child and set result to
 	 *    TODO: NEWPAGE. */
+	newpage = palloc_get_page(PAL_USER);
+	if (newpage == NULL) {
+		return false ;
+	}
 
 	/* 4. TODO: Duplicate parent's page to the new page and
 	 *    TODO: check whether parent's page is writable or not (set WRITABLE
 	 *    TODO: according to the result). */
+	memcpy(newpage, parent_page, PGSIZE); //부모의 페이지를 새 페이지로 복사
+	writable = is_writable(pte); //페이지 테이블 엔트리(pte)를 통해서 부모 페이지가 쓰기 가능한지 확인
+
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: if fail to insert page, do error handling. */
+		return false;
 	}
 	return true;
 }
