@@ -192,20 +192,6 @@ struct thread {
 
   /* ----------- added for project.2 ------------ */
 
-
-
- 
-
-  // struct semaphore load_sema;
-  // struct sempahore exit_sema;
-  
-
-  // int stdin_count; 
-  // int stdout_count;
-
- 
-  /* --------------------------------------------- */
-
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint64_t *pml4; /* Page map level 4 */

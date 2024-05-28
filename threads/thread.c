@@ -608,7 +608,8 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   init_thread(new_t, name, priority); /*thread 구조체 초기화*/
   tid = new_t->tid = allocate_tid(); /*tid 할당*/
 
-  /* ------------------------------------------------- */
+  /* ----------------Project2. system call------------------- */
+
   struct thread *cur = thread_current();
   list_push_back(&cur->child_list, &new_t->child_elem);
 

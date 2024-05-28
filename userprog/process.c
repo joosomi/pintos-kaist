@@ -93,22 +93,32 @@ initd (void *f_name) {
 
 /* Clones the current process as `name`. Returns the new process's thread id, or
  * TID_ERROR if the thread cannot be created. */
+/* process_fork: 현재 쓰레드를 복제하여 새로운 쓰레드 생성
+- name:새로운 쓰레드(자식 프로세스) 이름
+- if_: 인터럽트 프레임 주소,  현재 쓰레드의 상태를 자식 쓰레드에 복사하기 위해 사용
+*/
 tid_t
 process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
-	struct thread *parent = thread_current();
+	struct thread *parent = thread_current(); //부모 쓰레드 - 현재 쓰레드 
 
+	//부모 쓰레드의 인터럽트 프레임 복사 
 	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
 
+	//새로운 쓰레드(자식 프로세스) 생성 
 	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, parent);
 
+	//새로운 쓰레드 생성 실패 시 return TID_ERROR 
 	if (tid == TID_ERROR) {
 		return TID_ERROR;
 	}
 
+	//생성된 자식 쓰레드를 tid를 통해서 찾음
 	struct thread *child = get_child_process(tid);
+	 // 자식 쓰레드의 fork semaphore를 대기 상태로 만들어서 실행 일시 중지
+	 //__do_fork 함수가 실행되어 로드가 완료될 때까지 부모는 대기한다. 
 	sema_down(&child->fork_sema);
-
+	
 	if (child->exit_status == TID_ERROR) {
 		return TID_ERROR;
 	} 
@@ -116,18 +126,24 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 }
 
 
+//현재 쓰레드의 자식 쓰레드 중에서(child_list) 주어진 pid와 일치하는 자식 쓰레드를 찾아서 return 
+//int pid => 찾고자 하는 자식 프로세스 식별자 
+// 주어진 자식 프로세스 식별자(pid)에 해당하는 쓰레드 구조체 검색 - 존재하지 않으면 NULL return
 struct thread *get_child_process (int pid){
 	struct thread *cur = thread_current();
 
-	struct list *child_list = &cur->child_list;
+	struct list *child_list = &cur->child_list; //현재 쓰레드의 자식 쓰레드 목록
+
+	//자식 쓰레드 목록을 순회하면서 주어진 pid와 일치하는 자식 쓰레드가 있는지 찾는다.
 	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
 		struct thread *t = list_entry(e, struct thread, child_elem);
-
-		if (t->tid == pid){
+		
+		//일치하는 자식 프로세스 반환
+		if (t->tid == pid){ 
 			return t;
 		}
 	}
-	return NULL;
+	return NULL; //일치하는 자식 쓰레드가 없을 경우 return NULL
 }
 
 
@@ -167,28 +183,33 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
  * Hint) parent->tf does not hold the userland context of the process.
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
+
+/*__do_fork(): 부모 프로세스로부터 자식 프로세스를 생성하는 작업 수행 - 인자 aux는 부모 쓰레드 */
 static void
 __do_fork (void *aux) {
-	struct intr_frame if_;
-	struct thread *parent = (struct thread *) aux;
-	struct thread *current = thread_current ();
+	struct intr_frame if_; //자식 프로세스의 인터럽트 프레임을 저장할 구조체
+	struct thread *parent = (struct thread *) aux; //부모 프로세스의 쓰레드 구조체
+	struct thread *current = thread_current (); //현재 프로세스의 쓰레드 구조체 
+
 	/* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
-	struct intr_frame *parent_if;
+	struct intr_frame *parent_if; //부모의 인터럽트 프레임을 가리킬 포인터 
 	bool succ = true;
 
-	parent_if = &parent->parent_if;
+	parent_if = &parent->parent_if; //부모 프로세스의 intr_frame 포인터 
 
 	/* 1. Read the cpu context to local stack. */
+	/* 부모 프로세스의 CPU 컨텍스트를 자식 프로세스의 로컬 스택에 복사*/
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
 
-	if_.R.rax = 0; //자식 프로세스의 리턴값은 0
+	if_.R.rax = 0; //자식 프로세스의 리턴값 0으로 설정
 
-	/* 2. Duplicate PT */
+	/* 2. Duplicate PT 
+		페이지 테이블 복제*/
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
 		goto error;
 
-	process_activate (current);
+	process_activate (current); //자식 프로세스를 활성화
 #ifdef VM
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
@@ -204,30 +225,32 @@ __do_fork (void *aux) {
 	 * TODO:       from the fork() until this function successfully duplicates
 	 * TODO:       the resources of parent.*/
 
-	if (parent->next_fd_idx == FDT_COUNT_LIMIT)
+	if (parent->next_fd_idx == FDT_COUNT_LIMIT) //파일 디스크립터 테이블이 가득 찬 경우 에러 처리
 		goto error;
 
 	
+	//표준 파일 디스크립터(0,1)을 제외하고 복제
 	for (int fd = 2; fd < FDT_COUNT_LIMIT; fd++){
-		struct file *file = parent->fdt[fd];
+		struct file *file = parent->fdt[fd]; //부모의 파일 디스크립터를 가져옴
 
 		if (file == NULL)
 			continue;
 
-		current->fdt[fd] = file_duplicate(file);
+		current->fdt[fd] = file_duplicate(file); //파일 복제 
 	}
 
-	current ->next_fd_idx = parent->next_fd_idx;
-	sema_up(&current->fork_sema);
+	current ->next_fd_idx = parent->next_fd_idx; // 다음 파일 디스크립터의 인덱스 설정
+	sema_up(&current->fork_sema); //자식 프로세스가 준비되었음을 부모에게 알림
 
 	// process_init ();
 
-	/* Finally, switch to the newly created process. */
+	/* Finally, switch to the newly created process.
+	 	새로 생성된 프로세스로 전환*/
 	if (succ)
 		do_iret (&if_);
 error:
-	sema_up(&parent->fork_sema);
-	exit(TID_ERROR);
+	sema_up(&parent->fork_sema); //에러 발생시 세마포어를 올려, 부모가 기다리지 않도록 한다. 
+	exit(TID_ERROR); //에러 발생 시 자식 프로세스 종료시킴
 	// thread_exit ();
 }
 
@@ -284,6 +307,8 @@ process_exec (void *f_name) {
  *
  * This function will be implemented in problem 2-2.  For now, it
  * does nothing. */
+
+/*주어진 자식 프로세스가 종료될 때까지 기다리고, 종료 상태 반환*/
 int
 process_wait (tid_t child_tid UNUSED) {
 	/* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
@@ -294,58 +319,64 @@ process_wait (tid_t child_tid UNUSED) {
 	// }
 	// return -1;
 
+	//자식 프로세스의 쓰레드 구조체 child 
 	struct thread *child = get_child_process(child_tid);
 
+	//자식 프로세스가 존재하지 않는다면 return -1
 	if (child == NULL) {
 		return -1;
 	}
-
+	//자식 프로세스가 종료될 때까지 대기 
 	sema_down(&child-> wait_sema);
 
+	//자식 프로세스의 exit_status를 가져옴. 
 	int exit_status = child->exit_status;
+	
+	//자식 프로세스를 child_list에서 제거
 	list_remove(&child->child_elem);
 
+	//자식 프로세스를 해제할 수 있도록 신호를 보냄
 	sema_up(&child->free_sema);
 
+	//자식 프로세스의 exit_status를 return
 	return exit_status;
 }
 
-// struct thread *get_child_by_pid (int pid) {
-// 	struct thread *cur = thread_current();
-
-// 	struct list *child_list = &cur->child_list;
-// 	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
-// 		struct thread *t = list_entry(e, struct thread, child_elem);
-
-// 		if (t->tid == pid) {
-// 			return t;
-// 		}
-
-// 		return NULL;
-// 	}
-// }
 
 /* Exit the process. This function is called by thread_exit (). 
 - 프로세스가 종룔될 때 메모리 누수를 방지하기 위해 프로세스에 열린 모든 파일을 닫음
 - File descriptor Table 메모리 해제*/
+/* 프로세스에 열린 모든 파일을 닫음
+파일 디스크립터 테이블의 최댓값을 이용해 파일 디스크립터의 최소값인 2가 될 때까지 파일을 닫음
+파일 디스크립터 테이블 메모리 해제 */
 void
 process_exit (void) {
+
 	struct thread *cur = thread_current ();
-	/* 프로세스에 열린 모든 파일을 닫음
-	파일 디스크립터 테이블의 최댓값을 이용해 파일 디스크립터의 최소값인 2가 될 때까지 파일을 닫음
-	파일 디스크립터 테이블 메모리 해제 */
-	
+
+	//프로세스에 열린 모든 파일을 닫음
+	//의문) i = 2 부터 0 부터? => 
 	for (int i = 0; i < FDT_COUNT_LIMIT; i++){
 		close(i);
 	}
+	//파일 디스크립터 테이블 메모리 해제 	
+	if (cur->fdt != NULL) {
+		palloc_free_multiple(cur->fdt, FDT_PAGES);
+	}
 
-	palloc_free_multiple(cur->fdt, FDT_PAGES);
 
-	file_close(cur->running);
+	//현재 실행 중인 파일을 닫음 
+	if (cur->running != NULL) {
+		file_close(cur->running);
+	}
+	
 
 	process_cleanup ();
 
+	//부모 프로세스가 프로세스가 종료되었음을 알 수 있게 wait_sema up
 	sema_up(&cur->wait_sema);
+
+	//부모 프로세스가 free_sema 자원을 해제할 때까지 대기 
 	sema_down(&cur->free_sema);
 	
 }
@@ -552,6 +583,10 @@ load (const char *file_name, struct intr_frame *if_) {
 				break;
 		}
 	}
+	
+	t->running = file; //현재 실행 중인 쓰레드가 실행하고 있는 파일 (어떤 파일을 실행하고 있는지 추적하기 위함)
+	file_deny_write(file); /*해당 파일에 대한쓰기 접근을 금지 
+	-> 파일을 읽기 전용으로 만듦. 실행 중인 파일이 변경되지 않도록 보호. */
 
 	/* Set up stack. */
 	/*스택 초기화*/
@@ -568,8 +603,13 @@ load (const char *file_name, struct intr_frame *if_) {
 	//rdi: first argument, rsi: second argument 
 	argument_stack(argv, argc, if_);
 
-	// t->running = file; 
-	// file_deny_write(file); 
+	
+	// if (file != NULL) {
+    // 	printf("Setting running file and denying write\n");
+	// 	t->running = file; 
+	// 	file_deny_write(file); 
+	// }
+	
 	
 	// printf("argc: %d\n", argc);
 	// // argv 배열의 원소들 출력
@@ -582,7 +622,7 @@ load (const char *file_name, struct intr_frame *if_) {
 
 done:
 	/* We arrive here whether the load is successful or not. */
-	file_close (file);
+	// file_close (file);
 	return success;
 }
 

@@ -31,6 +31,7 @@ unsigned tell (int fd);
 int read (int fd, void *buffer, unsigned size);
 int write (int fd, const void *buffer, unsigned size);
 tid_t fork (const char *thread_name, struct intr_frame *f );
+int wait (tid_t tid);
 
 int add_file_to_fdt(const char *file);
 static struct file *find_file_by_fd(int fd);
@@ -220,6 +221,7 @@ int exec (const char *file_name){
 	strlcpy(fn_copy, file_name, file_size);
 
 	/*process_exec(fn_copy)를 호출해서 복사된 파일의 이름으로 프로세스 실행
+	: process_exec => load(file_name, &_if) 실패 시 리턴 -1
 	-> 실패시 exit(-1) 프로그램 종료*/
 	if (process_exec(fn_copy) == -1) {
 		exit(-1);
