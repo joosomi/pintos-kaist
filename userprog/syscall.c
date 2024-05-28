@@ -82,27 +82,27 @@ void syscall_handler(struct intr_frame *f UNUSED) {
       //   break;
 
     case SYS_CREATE: /* const char *file, unsigned initial_size */
-      create((char *)(f->R.rdi), f->R.rsi);
+      f->R.rax = create((char *)(f->R.rdi), f->R.rsi);
       break;
 
     case SYS_REMOVE: /* const char *file */
-      remove((char *)(f->R.rdi));
+      f->R.rax = remove((char *)(f->R.rdi));
       break;
 
     case SYS_OPEN: /* const char *file */
-      open((char *)(f->R.rdi));
+      f->R.rax = open((char *)(f->R.rdi));
       break;
 
     case SYS_FILESIZE: /* int fd */
-      filesize(f->R.rdi);
+      f->R.rax = filesize(f->R.rdi);
       break;
 
     case SYS_READ: /* int fd, void *buffer, unsigned length */
-      read(f->R.rdi, (void *)(f->R.rsi), f->R.rdx);
+      f->R.rax = read(f->R.rdi, (void *)(f->R.rsi), f->R.rdx);
       break;
 
     case SYS_WRITE: /* int fd, const void *buffer, unsigned length */
-      write(f->R.rdi, (void *)(f->R.rsi), f->R.rdx);
+      f->R.rax = write(f->R.rdi, (void *)(f->R.rsi), f->R.rdx);
       break;
 
     case SYS_SEEK: /* int fd, unsigned position */
@@ -110,7 +110,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
       break;
 
     case SYS_TELL: /* int fd */
-      tell(f->R.rdi);
+      f->R.rax = tell(f->R.rdi);
       break;
 
     case SYS_CLOSE: /* int fd */
@@ -142,9 +142,11 @@ void syscall_handler(struct intr_frame *f UNUSED) {
 void check_user_address(const void *addr) {
   struct thread *curr_t = thread_current();
 
-  if (is_kernel_vaddr(addr) || addr == NULL ||
-      pml4_get_page(curr_t->pml4, addr) == NULL)
-    exit(-1);
+  if (is_kernel_vaddr(addr)) exit(-1);
+
+  if (addr == NULL || !is_user_vaddr(addr)) exit(-1);
+
+  if (pml4_get_page(curr_t->pml4, addr) == NULL) exit(-1);
 }
 
 /**
@@ -178,11 +180,16 @@ void exit(int status) {
  * @return bool 파일 생성 성공 여부
 */
 bool create(const char *file, unsigned initial_size) {
+  bool success;
+
   check_user_address(file);
 
-  return filesys_create(file, initial_size);
-}
+  success = filesys_create(file, initial_size);
 
+  // printf("file : %s, suc : %d", file, success);
+
+  return success ? true : false;
+}
 /**
  * @brief 파일을 삭제한다.
  * 
@@ -202,22 +209,15 @@ bool remove(const char *file) {
  * @param file open할 file의 이름 및 경로 정보
 */
 int open(const char *file) {
-  struct thread *curr = thread_current();
-  struct file *file_p;
-  int fd;
-
   check_user_address(file);
 
-  file_p = filesys_open(file);
+  struct file *new_file = filesys_open(file);
 
-  if (!file_p) return -1;
+  if (new_file == NULL) return -1;
 
-  fd = process_add_file(file_p);
+  int fd = process_add_file(new_file);
 
-  if (fd == -1) {
-    exit(-1);
-    return;
-  }
+  if (fd == -1) file_close(new_file);
 
   return fd;
 }
@@ -232,7 +232,7 @@ int filesize(int fd) {
   struct file *file_p;
 
   // ASSERT(fd < curr->next_fd);
-  ASSERT(fd >= 0);
+  // ASSERT(fd >= 0);
 
   curr = file_p = process_get_file(fd);
 
@@ -276,15 +276,21 @@ int filesize(int fd) {
 int read(int fd, void *buffer, unsigned length) {
   struct thread *curr = thread_current();
   struct file *file_p;
-  int read_bytes = 0;
+  size_t read_bytes = 0;
 
   /* exception handling */
   check_user_address(buffer);
 
   // ASSERT(fd < curr->next_fd);
-  ASSERT(fd >= 0);
+  // ASSERT(fd >= 0);
 
-  lock_acquire(&filesys_lock); /* read()시에 동기화 문제를 위한 lock */
+  if (fd < 0) {
+    return -1;
+  }
+
+  if (fd > curr->next_fd) {
+    return -1;
+  }
 
   /* (fd == 0) 즉, 키보드의 입력을 받는경우 */
   if (fd == 0) {
@@ -292,19 +298,28 @@ int read(int fd, void *buffer, unsigned length) {
       ((char *)buffer)[i] = input_getc();
 
       if (((char *)buffer)[i] == '\n') { /* "enter" 입력시 탈출 */
-        i++;
         length = i;
         break;
       }
+
+      length = i + 1;
     }
 
+    printf("------ length : %d", length);
+
     return length;
+  }
+
+  else if (fd < 2) {
+    return -1;
   }
 
   else {
     file_p = process_get_file(fd); /* fd에 해당하는 file을 가져온다 */
 
     if (!file_p) return -1;
+
+    lock_acquire(&filesys_lock); /* read()시에 동기화 문제를 위한 lock */
 
     read_bytes = file_read(file_p, buffer, length);
   }
@@ -342,11 +357,20 @@ int write(int fd, const void *buffer, unsigned length) {
   /* exception handling */
   check_user_address(buffer);
 
+  lock_acquire(&filesys_lock); /* write()시에 동기화 문제를 위한 lock */
+
   /* ✅ TODO 
      ASSERT(fd < curr->next_fd); */
-  ASSERT(fd >= 0);
+  // ASSERT(fd >= 0);
+  if (fd < 0 || fd > curr->next_fd) {
+    lock_release(&filesys_lock);
+    exit(-1);
+  }
 
-  lock_acquire(&filesys_lock); /* write()시에 동기화 문제를 위한 lock */
+  if (fd == 0) {
+    lock_release(&filesys_lock);
+    exit(-1);
+  }
 
   /* (fd == 1) 즉, 표준 출력으로 출력하는 경우 */
   if (fd == 1) {
@@ -364,8 +388,6 @@ int write(int fd, const void *buffer, unsigned length) {
 
   lock_release(&filesys_lock); /* write()시에 동기화 문제를 위한 lock 해제 */
 
-  curr->tf.R.rax = write_bytes;
-
   return write_bytes;
 }
 
@@ -380,11 +402,13 @@ void close(int fd) {
      next_fd가 가르킨다면..?
      즉, 30인 fd를 삭제해서 next_fd가 30인데 60번째 등록된걸 삭제하고싶은경우 */
   // ASSERT(fd < curr->next_fd);
-  ASSERT(fd >= 2);
+  // ASSERT(fd >= 2);
+
+  if (fd > curr->next_fd) return NULL;
 
   file = process_get_file(fd);
 
-  if (!file) return;
+  if (!file) return NULL;
 
   process_close_file(fd);
 }
@@ -404,7 +428,7 @@ void seek(int fd, unsigned position) {
 
   file = process_get_file(fd);
 
-  if (!file) return;
+  if (!file) return NULL;
 
   file_seek(file, position);
 }

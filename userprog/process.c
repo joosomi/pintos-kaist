@@ -17,6 +17,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/gdt.h"
+#include "userprog/syscall.h" /* added for PROJECT.2-2 */
 #include "userprog/tss.h"
 #ifdef VM
 #include "vm/vm.h"
@@ -111,19 +112,16 @@ void push_argment_stack(char *argv[], int argc, struct intr_frame *_if) {
 */
 int process_add_file(struct file *file) {
   struct thread *curr_t = thread_current();
-  int fd_idx;
 
   // ASSERT(file != NULL);
 
-  if (!file) return -1;
-  if (curr_t->next_fd >= 65) return -1; /* file descriptor table full */
+  // if (!file) return -1;
+  if (MAX_FD_CNT <= curr_t->next_fd) return -1; /* file descriptor table full */
 
-  fd_idx = curr_t->next_fd;
-
-  curr_t->fdt[fd_idx] = file;
+  curr_t->fdt[curr_t->next_fd] = file;
   curr_t->next_fd++;
 
-  return fd_idx;
+  return curr_t->next_fd - 1;
 }
 
 /**
@@ -136,8 +134,9 @@ struct file *process_get_file(int fd) {
   struct file *file;
 
   /* 유효하지 않은 범위내의 fd가 들어왔을때 예외처리 */
-  ASSERT(fd < 65 || fd > 2);
-  ASSERT(fd < curr_t->next_fd);
+  // ASSERT(fd < 65 || fd > 2);
+  // ASSERT(fd < curr_t->next_fd);
+  if (fd > curr_t->next_fd) return NULL;
 
   file = curr_t->fdt[fd];
 
@@ -156,15 +155,47 @@ void process_close_file(int fd) {
   struct file *file;
 
   /* 유효하지 않은 범위내의 fd가 들어왔을때 예외처리 */
-  ASSERT(fd < 65 || fd > 2);
+  // ASSERT(fd < 65 || fd > 2);
 
   file = curr_t->fdt[fd];
 
   if (file == NULL) return; /* 이미 닫힌 파일이라면 return */
 
-  file_close(file); /* file close */
+  // file_close(file); /* file close */
 
   curr_t->fdt[fd] = NULL; /* file에 대한 fd 초기화 */
+}
+
+/**
+ * @brief pid에 해당하는 child process를 반환한다.
+ * 
+ * @param pid 찾고자하는 child process의 pid
+ * 
+ * @return struct thread* child process
+*/
+struct thread *get_child_process(int pid) {
+  struct thread *t = thread_current();
+  struct list_elem *e;
+
+  for (e = list_begin(&t->child_list); e != list_end(&t->child_list);
+       e = list_next(e)) {
+    struct thread *child = list_entry(e, struct thread, child_elem);
+
+    if (pid == child->tid) return child;
+  }
+
+  return NULL;
+}
+
+/**
+ * @brief child process를 제거한다.
+ * 
+ * @param t 제거할 child process
+*/
+void remove_child_process(struct thread *t) {
+  list_remove(&t->child_elem);
+
+  // palloc_free_page(t);
 }
 
 /* ----------------------------------------------------- */
@@ -429,19 +460,31 @@ int process_exec(void *f_name) {
  *        >  즉시 -1을 반환하고 기다리지 않습니다. 
 */
 int process_wait(tid_t child_tid UNUSED) {
-
   /* XXX: Hint) The pintos exit if process_wait (initd), we recommend you
 	 * XXX:       to add infinite loop here before
 	 * XXX:       implementing the process_wait. */
+  /* --------------- added for PROJECT.2-2(Hierarchy)  --------------- */
 
-  // tid_t 를 이용해 child process를 찾는다.
-  // caller는 child process가 종료될때까지 기다려야한다.
-  // child process가 종료되면 종료 상태를 반환한다.
+  struct thread *child_t = get_child_process(child_tid);
 
-  for (size_t i = 0; i < 1000000000; i++) {
-  }
+  if (!child_t) return -1;
 
-  return -1;
+  sema_down(&child_t->load_sema);
+
+  int status = child_t->exit_status;
+
+  remove_child_process(child_t);
+
+  /* 자식을 remove 할때까지 살려두기 위함
+     process_exit()의 마지막에 sema_down(curr_t->exit_sema) */
+  sema_up(&child_t->exit_sema);
+
+  return status;
+
+  /* ------------------------------------------------------------------ */
+
+  /* --------------- before for PROJECT.2-2(Hierarchy)  --------------- 
+  return -1; */
 }
 
 /**
@@ -452,26 +495,27 @@ int process_wait(tid_t child_tid UNUSED) {
  *        >  프로세스를 종료한다. 이 함수는 thread_exit()에 의해 호출됩니다.
 */
 void process_exit(void) {
-  struct thread *curr = thread_current();
+  struct thread *curr_t = thread_current();
 
   /* --------------- added for PROJECT.2-2 --------------- */
 
-  int max_fd = curr->next_fd;
   struct file *file;
 
-  for (int fd = 2; fd < max_fd; fd++) {
-    file = process_get_file(fd);
-
-    if (!file) continue;
-
-    process_close_file(fd); /* close_file() && FDT[fd] init */
+  for (int fd = 0; fd < curr_t->next_fd; fd++) {
+    close(fd); /* close_file() && FDT[fd] init */
   }
 
-  palloc_free_page(curr->fdt); /* deallocate FDT */
+  palloc_free_page(curr_t->fdt); /* deallocate FDT */
 
   /* ----------------------------------------------------- */
 
   process_cleanup();
+
+  /* --------------- added for PROJECT.2-2 --------------- */
+
+  sema_up(&curr_t->load_sema);
+
+  sema_down(&curr_t->exit_sema);
 }
 
 /**

@@ -15,7 +15,9 @@ void process_activate(struct thread *next);
 void parse_argument(char *command_line, char *argv[], int *argc);
 void push_argment_stack(char *argv[], int argc, struct intr_frame *_if);
 
-/* --------------- added for PROJECT.2-1 --------------- */
+/* --------------- added for PROJECT.2-2 --------------- */
+
+#define MAX_FD_CNT 64
 
 int process_add_file(struct file *file_p);
 struct file *process_get_file(int fd);

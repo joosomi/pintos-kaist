@@ -627,7 +627,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->tf.cs = SEL_KCSEG;
   new_t->tf.eflags = FLAG_IF;
 
-  /* ------------- added for Project.2-2 ------------- */
+  /* ------------- added for Project.2-2(F.D) ------------- */
 
   /* 512 바이트만큼만 할당하면 되기에 malloc 으로
     (file ptr (8byte) * entry cnt : 64) 할당하면 됐지만
@@ -636,10 +636,21 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->fdt = palloc_get_page(PAL_ZERO);
   if (new_t->fdt == NULL) return TID_ERROR; /* 메모리 할당 실패 */
 
-  new_t->fdt[0] = STDIN_FILENO;  /* 표준 입력 stdin */
-  new_t->fdt[1] = STDOUT_FILENO; /* 표준 출력 stdout */
+  new_t->fdt[STDIN_FILENO] = (struct file *)DUMMY;  /* 표준 입력 stdin */
+  new_t->fdt[STDOUT_FILENO] = (struct file *)DUMMY; /* 표준 출력 stdout */
 
   new_t->next_fd = 2; /* 다음으로 할당될 fd 번호 */
+
+  /* ------------- added for Project.2-2(Hierarchy) ------------- */
+
+  /* thread_create로 function을 넘겨 실행하고있는것은 parent이니까
+     parent_t 는 thread_current() 즉, running thread가 된다
+     또한, 아직 thread가 생성안됐다는걸 인지하면 이해가 쉬울듯 하다. */
+  struct thread *parent_t = thread_current();
+  new_t->parent_t = parent_t;
+  sema_init(&new_t->load_sema, 0);
+  sema_init(&new_t->exit_sema, 0);
+  list_push_back(&parent_t->child_list, &new_t->child_elem);
 
   /* ------------- added for Project.1-1 ------------- */
 
@@ -938,10 +949,15 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->nice = NICE_DEFAULT;
   t->recent_cpu = RECENT_CPU_DEFAULT;
 
-  /* ----------- added for PROJECT.2-1 ----------- */
+  /* ----------- added for PROJECT.2-2(Hierarchy) ----------- */
+
+  t->exit_status = 0;             /* 자식 프로세스의 종료 상태 */
+  t->parent_t = running_thread(); /* 부모 프로세스 설정 */
 
   list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
-  t->exit_status = 0;        /* 자식 프로세스의 종료 상태 */
+
+  sema_init(&t->load_sema, 0); /* load_sema 초기화 */
+  sema_init(&t->exit_sema, 0); /* exit_sema 초기화 */
 
   /* ------------------------------------------- */
 }
