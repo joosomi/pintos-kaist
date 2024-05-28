@@ -193,22 +193,17 @@ struct thread {
   /* ----------- added for project.2 ------------ */
 
 
-  int exit_status; //프로세스의 종료 유무
 
-  struct intr_frame parent_if; 
-  struct list child_list;
-  struct list_elem child_elem;
+ 
 
   // struct semaphore load_sema;
   // struct sempahore exit_sema;
-  struct semaphore wait_sema;
-  struct semaphore free_sema;
-  struct semaphore fork_sema;
+  
 
   // int stdin_count; 
   // int stdout_count;
 
-  struct file *running ;
+ 
   /* --------------------------------------------- */
 
 #ifdef USERPROG
@@ -216,6 +211,18 @@ struct thread {
   uint64_t *pml4; /* Page map level 4 */
   struct file **fdt; //file descriptor table 
   int next_fd_idx;
+
+  struct intr_frame parent_if; /*부모 프로세스의 인터럽트 프레임*/
+  struct list child_list; /*자식 프로세스 리스트*/
+  struct list_elem child_elem; /*자식 프로세스 리스트의 element*/
+
+  struct file *running; //현재 실행 중인 파일 
+  int exit_status; //프로세스의 종료 유무 확인
+
+  struct semaphore wait_sema; //자식 프로세스가 종료될 때까지 대기 - 종료 상태 저장
+  struct semaphore free_sema; //자식 프로세스가 종료될 떄까지 
+  struct semaphore fork_sema; //fork 완료 될 때 sema_up
+  
 #endif
 #ifdef VM
   /* Table for whole virtual memory owned by thread. */
