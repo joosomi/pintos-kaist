@@ -102,8 +102,12 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
 	struct thread *parent = thread_current(); //부모 쓰레드 - 현재 쓰레드 
 
-	//부모 쓰레드의 인터럽트 프레임 복사 
-	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
+	if (if_ != NULL) {
+		//부모 쓰레드의 인터럽트 프레임 복사 
+		memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
+	} else {
+		return TID_ERROR;
+	}
 
 	//새로운 쓰레드(자식 프로세스) 생성 
 	tid_t tid = thread_create(name, PRI_DEFAULT, __do_fork, parent);
@@ -117,6 +121,11 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	struct thread *child = get_child_process(tid);
 	 // 자식 쓰레드의 fork semaphore를 대기 상태로 만들어서 실행 일시 중지
 	 //__do_fork 함수가 실행되어 로드가 완료될 때까지 부모는 대기한다. 
+	
+	if (child == NULL ){
+		return TID_ERROR;
+	}
+
 	sema_down(&child->fork_sema);
 	
 	if (child->exit_status == TID_ERROR) {
@@ -185,8 +194,8 @@ duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	 *    TODO: according to the result). */
 	memcpy(newpage, parent_page, PGSIZE); //부모의 페이지를 새 페이지로 복사
 
-	// writable = is_writable(pte); //페이지 테이블 엔트리(pte)를 통해서 부모 페이지가 쓰기 가능한지 확인
-	writable = (*pte & PTE_W) != 0;  //비트 연산(&)을 통해 페이지 쓰기가 가능한지 확인
+	writable = is_writable(pte); //페이지 테이블 엔트리(pte)를 통해서 부모 페이지가 쓰기 가능한지 확인
+	// writable = (*pte & PTE_W) != 0;  //비트 연산(&)을 통해 페이지 쓰기가 가능한지 확인
 
 	/* 5. Add new page to child's page table at address VA with WRITABLE
 	 *    permission. */
@@ -347,7 +356,7 @@ process_wait (tid_t child_tid UNUSED) {
 		return -1;
 	}
 	//자식 프로세스가 종료될 때까지 대기 
-	sema_down(&child-> wait_sema);
+	sema_down(&child->wait_sema);
 
 	//자식 프로세스의 exit_status를 가져옴. 
 	int exit_status = child->exit_status;

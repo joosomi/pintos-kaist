@@ -12,7 +12,7 @@
 #include "filesys/file.h"
 #include "devices/input.h"
 #include "filesys/filesys.h"
-#include "stdio.h"
+#include "lib/kernel/stdio.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
@@ -98,10 +98,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			f->R.rax = fork(f->R.rdi, f);
 			break;
 		case SYS_EXEC:	
-			exec(f->R.rdi);
+			f->R.rax = exec(f->R.rdi);
 			break;
 		case SYS_WAIT:
-			wait(f->R.rdi);
+			f->R.rax = wait(f->R.rdi);
 			break;
 		case SYS_CREATE:
 			f->R.rax = create(f->R.rdi, f->R.rsi);
@@ -135,6 +135,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	}
 }
 
+
 /*-----------------------------------------------------------------*/
 /*----Project 2 : User Memory Access----*/
 // *addr: 검사하고자 하는 메모리 주소를 가리키는 포인터 
@@ -167,7 +168,7 @@ void halt(void) {
 void exit (int status){
 	struct thread *cur = thread_current();
 	cur->exit_status = status;
-	printf("%s: exit(%d)\n", cur->name, status);
+	printf("%s: exit(%d)\n", thread_name(), status);
 	thread_exit(); //쓰레드 종료
 }
 
@@ -239,7 +240,7 @@ int wait (tid_t tid){
 
 /*fork: */
 tid_t fork (const char *thread_name, struct intr_frame *f ){
-	check_address(thread_name);
+	// check_address(thread_name);
 	return process_fork(thread_name, f);
 }
 

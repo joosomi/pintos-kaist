@@ -649,7 +649,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
     return TID_ERROR;
   }
 
-  new_t->next_fd_idx = 2 ; //0: stdin, 1:
+  new_t->next_fd_idx = 2 ; //0: stdin, 1: stdout
   new_t->fdt[0] = 1; //stdin -> dummy value 
   new_t->fdt[1] = 2; //stdout -> dummy value
 
