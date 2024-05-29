@@ -26,7 +26,8 @@ int write (int fd, const void *buffer, unsigned size);
 tid_t fork (const char *thread_name, struct intr_frame *f);
 int wait (tid_t tid);
 
-int add_file_to_fdt(const char *file);
+// int add_file_to_fdt(const char *file);
+int add_file_to_fdt(struct file *file);
 static struct file *find_file_by_fd(int fd);
 void remove_file_from_fdt(int fd);
 

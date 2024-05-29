@@ -1,5 +1,6 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
+#include <string.h>
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
@@ -33,7 +34,7 @@ int write (int fd, const void *buffer, unsigned size);
 tid_t fork (const char *thread_name, struct intr_frame *f );
 int wait (tid_t tid);
 
-int add_file_to_fdt(const char *file);
+int add_file_to_fdt(struct file *file);
 static struct file *find_file_by_fd(int fd);
 void remove_file_from_fdt(int fd);
 
@@ -132,6 +133,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		default: 
 			thread_exit();
+			break; 
 	}
 }
 
@@ -180,8 +182,8 @@ void exit (int status){
 - initial_size: 생성할 파일의 크기*/
 bool create (const char *file, unsigned initial_size) {
 	/*주소 값이 사용자 영역에서 사용하는 주소 값인지 확인*/
-	lock_acquire(&filesys_lock);
 	check_address(file);
+	lock_acquire(&filesys_lock);
 
 	bool success =filesys_create(file, initial_size);
 	lock_release(&filesys_lock);
@@ -193,8 +195,8 @@ bool create (const char *file, unsigned initial_size) {
 - 성공 true, 실패일 경우 false 리턴*/
 bool remove (const char *file){
 	/*주소 값이 사용자 영역에서 사용하는 주소 값인지 확인*/
-	lock_acquire(&filesys_lock);
 	check_address(file);
+	lock_acquire(&filesys_lock);
 
 	bool success =filesys_remove(file);
 	lock_release(&filesys_lock);
@@ -248,7 +250,7 @@ tid_t fork (const char *thread_name, struct intr_frame *f ){
 /*-----------------------------------------------------------*/
 /* 현재 쓰레드의  file descriptor table에 file 추가
 해당 파일에 할당된 파일 디스크립터 반환 */
-int add_file_to_fdt(const char *file){	
+int add_file_to_fdt(struct file *file){	
 	struct thread *cur = thread_current();
 	struct file **fdt = cur->fdt; //현재 쓰레드의 file descriptor table
 
@@ -283,6 +285,8 @@ int open (const char *file){
 
 	struct file *open_file = filesys_open(file); //file open
 
+	// int fd = -1 ;
+
 	//파일 열기 실패시 return -1
 	if (open_file == NULL) {
 		lock_release(&filesys_lock);
@@ -294,7 +298,6 @@ int open (const char *file){
 	//fd == -1: 파일을 열 수 없는 경우
 	if (fd == -1) {
 		file_close(open_file);
-		// return -1; 
 	}
 	lock_release(&filesys_lock);
 	return fd;
