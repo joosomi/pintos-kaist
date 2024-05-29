@@ -37,10 +37,14 @@ static void fdt_cleanup() {
     if (curr_t->running_file == curr_t->fdt[fd]) continue;
 
     process_close_file(fd);
+    // file_close(curr_t->fdt[fd]);
+    // curr_t->fdt[fd] = NULL;
   }
 
-  if (curr_t->running_file) file_close(curr_t->running_file);
-  curr_t->running_file = NULL;
+  if (curr_t->running_file) {
+    file_close(curr_t->running_file);
+    curr_t->running_file = NULL;
+  }
 }
 
 /**
@@ -310,12 +314,8 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
   struct thread *child_t;
   tid_t child_tid;
 
-  // printf("(process_fork) current : %d\n", thread_current()->tid);
-
   child_tid = thread_create(name, PRI_DEFAULT, __do_fork, thread_current());
   if (child_tid == TID_ERROR) return TID_ERROR;
-
-  // printf("(process_fork)new create child_t : %d\n", child_tid);
 
   child_t = get_child_process(child_tid);
   if (!child_t) return TID_ERROR;
@@ -323,7 +323,6 @@ tid_t process_fork(const char *name, struct intr_frame *if_ UNUSED) {
   sema_down(&child_t->fork_sema);
 
   if (child_tid == TID_ERROR) return TID_ERROR;
-  // if (child_t->exit_status == TID_ERROR) return TID_ERROR;
 
   return child_tid;
 }
