@@ -7,8 +7,8 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
-#include "include/filesys/filesys.h"
-#include "include/filesys/file.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
 #include "threads/synch.h"
 #include "lib/kernel/console.h"
 #include "threads/palloc.h"
@@ -129,19 +129,25 @@ void halt(void){
 bool create (const char *file, unsigned initial_size) {
 	/* 성공이면 true, 실패면 false */
 	check_address(file);
+	
+	lock_acquire(&filesys_lock);
 	if (filesys_create(file, initial_size)) {
+		lock_release(&filesys_lock);
 		return true;
-	}
-	else {
+	} else {
+		lock_release(&filesys_lock);
 		return false;
 	}
 }
 
 bool remove (const char *file) {
 	check_address(file);
+	lock_acquire(&filesys_lock);
 	if (filesys_remove(file)) {
+		lock_release(&filesys_lock);
 		return true;
 	} else {
+		lock_release(&filesys_lock);
 		return false;
 	}
 }
@@ -159,6 +165,7 @@ void exit(int status)
 
 
 int write (int fd, const void *buffer, unsigned size) {
+	
 	check_address(buffer);
 	struct file *fileobj = find_file_by_fd(fd);
 	int read_count;
@@ -183,6 +190,7 @@ int write (int fd, const void *buffer, unsigned size) {
 int open(const char *file)
 {
     check_address(file);
+	lock_acquire(&filesys_lock);
     struct file *open_file = filesys_open(file);
 
     if (open_file == NULL)
@@ -191,12 +199,13 @@ int open(const char *file)
     }
     // fd table에 file추가
     int fd = add_file_to_fdt(open_file);
-
+	
     // fd table 가득 찼을경우
     if (fd == -1)
     {
         file_close(open_file);
     }
+	lock_release(&filesys_lock);
     return fd;
 }
 
@@ -250,7 +259,12 @@ int filesize(int fd)
     {
         return -1;
     }
-    return file_length(open_file);
+
+	lock_acquire(&filesys_lock);
+	int fileLength = file_length(open_file);
+	lock_release(&filesys_lock);
+
+    return fileLength;
 }
 
 int read(int fd, void *buffer, unsigned size)
@@ -327,7 +341,9 @@ void close(int fd){
 
     remove_file_from_fdt(fd);
 
+	lock_acquire(&filesys_lock);
 	file_close(fileobj);
+	lock_release(&filesys_lock);
 }
 
 

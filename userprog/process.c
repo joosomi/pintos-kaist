@@ -304,8 +304,8 @@ process_exec (void *f_name) {
 	}
  
 	/* And then load the binary */
+	
 	success = load (file_name, &_if);
- 
 	
 	argument_stack(argu,cnt,&_if.rsp);
 
@@ -379,7 +379,7 @@ void argument_stack(char **argu, int count, void **rsp)
 int process_wait(tid_t child_tid UNUSED)
 {	
 
-	for(int i = 0; i < 1000000000; i++) {
+	for(int i = 0; i < 2000000000; i++) {
 
 	}
 	return -1;
