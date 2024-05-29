@@ -99,6 +99,7 @@ extern int load_avg;
 /* ----------- added for PROJECT.2-2 (bad-access) ----------- */
 
 #define DUMMY "DUMMY"
+#define FDT_MAX 128
 
 /* ---------------------------------------------------------- */
 
@@ -206,7 +207,7 @@ struct thread {
   int success_load_status; /* load 성공 여부 */
 
   /* for file manipulation */
-  struct file **fdt; /* file descriptor table */
+  struct list fdt; /* file descriptor table */
   int next_fd; /* 테이블에 등록된 fd + 1 즉, 다음에 저장될 fd의 값을 의미한다 */
   struct file *running_file; /* 실행중인 파일 */
 

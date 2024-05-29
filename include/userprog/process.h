@@ -19,9 +19,12 @@ void push_argment_stack(char *argv[], int argc, struct intr_frame *_if);
 
 #define MAX_FD_CNT 64
 
-int process_add_file(struct file *file_p);
-struct file *process_get_file(int fd);
-void process_close_file(int fd);
+// int process_add_file(struct file *file_p);
+// struct file *process_get_file(int fd);
+// void process_close_file(int fd);
+
+struct thread *find_child_process(int pid);
+void remove_child_process(struct thread *t);
 
 /* ----------------------------------------------------- */
 

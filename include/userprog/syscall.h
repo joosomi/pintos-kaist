@@ -7,6 +7,14 @@
 #include <threads/synch.h>
 #include "lib/user/syscall.h" /* added for PROJECT.2-2 pid_t */
 
+/* --------------- added for PROJECT.2-2 --------------- */
+
+struct fd_elem {
+  int fd;
+  struct list_elem elem;
+  struct file *file_ptr;
+};
+
 /* ----------------------------------------------------- */
 
 void syscall_init(void);
@@ -28,7 +36,7 @@ int do_filesize(int fd);
 int do_read(int fd, void *buffer, unsigned size);
 int do_write(int fd, const void *buffer, unsigned size);
 void do_close(int fd);
-void seek(int fd, unsigned position);
+void do_seek(int fd, unsigned position);
 unsigned do_tell(int fd);
 pid_t do_fork(const char *thread_name);
 int do_wait(pid_t pid);

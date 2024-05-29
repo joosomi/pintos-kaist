@@ -627,48 +627,23 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->tf.cs = SEL_KCSEG;
   new_t->tf.eflags = FLAG_IF;
 
-  /* ------------- added for Project.2-2(F.D) ------------- */
-
-  /* 512 바이트만큼만 할당하면 되기에 malloc 으로
-    (file ptr (8byte) * entry cnt : 64) 할당하면 됐지만
-    운영체제에선 page단위로 메모리를 할당하기에 조금 낭비가 있더라도
-    이대로 사용하는게 좋다고 판단 */
-  new_t->parent_t = thread_current();
-
-  new_t->fdt = palloc_get_page(PAL_ZERO);
-  if (new_t->fdt == NULL) {
-    palloc_free_page(new_t);
-    return TID_ERROR;
-  }
-  /* 메모리 할당 실패 */
-
-  new_t->fdt[STDIN_FILENO] = (struct file *)DUMMY;  /* 표준 입력 stdin */
-  new_t->fdt[STDOUT_FILENO] = (struct file *)DUMMY; /* 표준 출력 stdout */
-
-  // new_t->next_fd = 2; /* 다음으로 할당될 fd 번호 */
-
   /* ------------- added for Project.2-2(Hierarchy) ------------- */
 
-  /* thread_create로 function을 넘겨 실행하고있는것은 parent이니까
-     parent_t 는 thread_current() 즉, running thread가 된다
-     또한, 아직 thread가 생성안됐다는걸 인지하면 이해가 쉬울듯 하다. */
-  // sema_init(&new_t->load_sema, 0);
-  // sema_init(&new_t->exit_sema, 0);
-  // sema_init(&new_t->fork_sema, 0);
-
+  new_t->parent_t = thread_current();
   list_push_back(&thread_current()->child_list, &new_t->child_elem);
 
-  /* ------------- added for Project.1-1 ------------- */
+  /* ------------------ added for Project.1-1 ------------------- */
 
   /* 새로 생성한 쓰레드를 ready_queue에 넣는다. thread_unblock()
      이라는 함수 명에 혼동되면 안된다. 단순히 thread의 state를 ready로
      바꿔주는것 뿐만 아니라 ready_list에 넣어주는 역할도 한다. */
   thread_unblock(new_t);
 
-  /* ------------- added for Project.1-3 ------------- */
+  /* ------------------ added for Project.1-3 ------------------- */
+
   list_push_back(&active_list, &new_t->active_elem);
 
-  /* ------------- added for Project.1-2 -------------
+  /* ------------------ added for Project.1-2 -------------------
     new_thread가 ready_list에 들어가게되는데 arg로 받은 new_thread보다
     running_thread가 우선순위가 높다면 ruuning_thread를 양보한다.
     (아래의 if문이 발동된다면 thread_create로 생성된 thread는 ready_list의
@@ -676,7 +651,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
 
   if (thread_get_priority() < priority) thread_yield();
 
-  /* ------------------------------------------------- */
+  /* ------------------------------------------------------------ */
 
   return tid;
 }
@@ -967,6 +942,7 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->next_fd = 2;
 
   list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
+  list_init(&t->fdt);
 
   /* ------------------------------------------- */
 }

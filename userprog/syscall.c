@@ -1,7 +1,8 @@
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
-#include "filesys/filesys.h" /* added for PROJECT.2-2 */
+#include "filesys/filesys.h"   /* added for PROJECT.2-2 */
+#include "include/lib/stdio.h" /* added for PROJECT.2-2 STD_FILENO */
 #include "intrinsic.h"
 #include "lib/user/syscall.h" /* added for PROJECT.2-2 pid_t */
 #include "threads/flags.h"
@@ -27,6 +28,19 @@ void syscall_handler(struct intr_frame *);
 #define MSR_STAR 0xc0000081         /* Segment selector msr */
 #define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
 #define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
+
+static struct file *convert_fd_to_file(int fd) {
+  struct list_elem *e;
+  struct thread *cur_thread = thread_current();
+  for (e = list_begin(&cur_thread->fdt); e != list_end(&cur_thread->fdt);
+       e = list_next(e)) {
+    struct fd_elem *tmp = list_entry(e, struct fd_elem, elem);
+    if (fd == tmp->fd) {
+      return tmp->file_ptr;
+    }
+  }
+  return NULL;
+}
 
 void syscall_init(void) {
   write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48 | ((uint64_t)SEL_KCSEG)
@@ -109,7 +123,7 @@ void syscall_handler(struct intr_frame *f UNUSED) {
       break;
 
     case SYS_SEEK: /* int fd, unsigned position */
-      seek(f->R.rdi, f->R.rsi);
+      do_seek(f->R.rdi, f->R.rsi);
       break;
 
     case SYS_TELL: /* int fd */
@@ -154,12 +168,12 @@ void validate_adress(const void *addr) {
 }
 
 /**
- * @brief pintOS를 종료한다.
+ * @brief 🟢 pintOS를 종료한다.
 */
 void do_halt(void) { power_off(); }
 
 /**
- * @brief current Process를 종료한다.
+ * @brief 🟢 current Process를 종료한다.
  * 
  * @param status Process의 종료 상태
  * 
@@ -176,7 +190,7 @@ void do_exit(int status) {
 }
 
 /**
- * @brief 파일을 생성한다.
+ * @brief 🟢 파일을 생성한다.
  * 
  * @param file 생성할 파일의 이름 및 경로 정보
  * @param initial_size 생성할 파일 크기
@@ -195,7 +209,7 @@ bool do_create(const char *file, unsigned initial_size) {
   return success ? true : false;
 }
 /**
- * @brief 파일을 삭제한다.
+ * @brief 🟢 파일을 삭제한다.
  * 
  * @param file 삭제할 파일의 이름 및 경로 정보
  * 
@@ -221,45 +235,48 @@ bool do_remove(const char *file) {
 int do_open(const char *file) {
   validate_adress(file);
 
+  struct thread *cur_thread = thread_current();
   lock_acquire(&filesys_lock);
-  struct file *new_file = filesys_open(file);
+  struct file *file_ptr = filesys_open(file);
   lock_release(&filesys_lock);
-
-  if (new_file == NULL) return -1;
-
-  int fd = process_add_file(new_file);
-
-  if (fd == -1) {
-    lock_acquire(&filesys_lock);
-    file_close(new_file);
-    lock_release(&filesys_lock);
+  if (!file_ptr) {
+    return -1;
   }
-
-  return fd;
+  // if (!strcmp(file, cur_thread->name)) {
+  //   file_deny_write(file_ptr);
+  // }
+  struct fd_elem *file_elem = (struct fd_elem *)malloc(sizeof(struct fd_elem));
+  file_elem->fd = cur_thread->next_fd++;
+  file_elem->file_ptr = file_ptr;
+  list_push_back(&cur_thread->fdt, &file_elem->elem);
+  return file_elem->fd;
 }
 
 /**
- * @brief fd에 해당하는 file의 크기를 반환한다.
+ * @brief 🟢 fd에 해당하는 file의 크기를 반환한다.
  * 
  * @param fd file descriptor
 */
 int do_filesize(int fd) {
-  struct thread *curr = thread_current();
-  struct file *file_p;
-  off_t result;
+  // struct file *file_p;
+  // off_t result;
 
-  // ASSERT(fd < curr->next_fd);
-  // ASSERT(fd >= 0);
+  // if (fd < 0) return -1;
 
-  curr = file_p = process_get_file(fd);
+  // file_p = process_get_file(fd);
 
-  if (!file_p) return -1;
+  // if (!file_p) return -1;
 
-  lock_acquire(&filesys_lock);
-  result = file_length(file_p);
-  lock_release(&filesys_lock);
+  // lock_acquire(&filesys_lock);
+  // result = file_length(file_p);
+  // lock_release(&filesys_lock);
 
-  return result;
+  // return result;
+
+  struct thread *cur_thread = thread_current();
+  struct file *file_ptr = convert_fd_to_file(fd);
+  int ret = file_ptr ? file_length(file_ptr) : -1;
+  return ret;
 }
 
 /**
@@ -299,51 +316,28 @@ int do_read(int fd, void *buffer, unsigned length) {
   struct file *file_p;
   size_t read_bytes = 0;
 
-  /* exception handling */
   validate_adress(buffer);
 
-  // ASSERT(fd < curr->next_fd);
-  // ASSERT(fd >= 0);
-
-  if (fd < 0) {
+  if (fd < 0 || fd >= curr->next_fd || fd == STDOUT_FILENO) {
     return -1;
   }
 
-  if (fd > curr->next_fd) {
-    return -1;
-  }
-
-  /* (fd == 0) 즉, 키보드의 입력을 받는경우 */
-  if (fd == 0) {
+  if (fd == STDIN_FILENO) {
     for (unsigned i = 0; i < length; i++) {
       ((char *)buffer)[i] = input_getc();
 
-      if (((char *)buffer)[i] == '\n') { /* "enter" 입력시 탈출 */
-        length = i;
-        break;
-      }
-
-      length = i + 1;
+      if (((char *)buffer)[i] == '\n') return i + 1;
     }
 
     return length;
   }
 
-  else if (fd < 2) {
-    return -1;
-  }
+  file_p = convert_fd_to_file(fd);
+  if (!file_p) return -1;
 
-  else {
-    file_p = process_get_file(fd); /* fd에 해당하는 file을 가져온다 */
-
-    if (!file_p) return -1;
-
-    lock_acquire(&filesys_lock); /* read()시에 동기화 문제를 위한 lock */
-
-    read_bytes = file_read(file_p, buffer, length);
-  }
-
-  lock_release(&filesys_lock); /* read()시에 동기화 문제를 위한 lock 해제 */
+  lock_acquire(&filesys_lock);
+  read_bytes = file_read(file_p, buffer, length);
+  lock_release(&filesys_lock);
 
   return read_bytes;
 }
@@ -373,63 +367,52 @@ int do_write(int fd, const void *buffer, unsigned length) {
   struct file *file_p;
   int write_bytes = 0;
 
-  /* exception handling */
   validate_adress(buffer);
 
-  lock_acquire(&filesys_lock); /* write()시에 동기화 문제를 위한 lock */
-
-  /* ✅ TODO 
-     ASSERT(fd < curr->next_fd); */
-  // ASSERT(fd >= 0);
-  if (fd < 0 || fd > curr->next_fd) {
-    lock_release(&filesys_lock);
-    do_exit(-1);
+  if (fd < 0 || fd >= curr->next_fd || fd == STDIN_FILENO) {
+    return -1;
   }
 
-  if (fd == 0) {
-    lock_release(&filesys_lock);
-    do_exit(-1);
-  }
+  lock_acquire(&filesys_lock);
 
-  /* (fd == 1) 즉, 표준 출력으로 출력하는 경우 */
-  if (fd == 1) {
+  if (fd == STDOUT_FILENO) {
     putbuf(buffer, length);
     write_bytes = length;
-  }
+  } else {
+    file_p = convert_fd_to_file(fd);
 
-  else {
-    file_p = process_get_file(fd); /* fd에 해당하는 file을 가져온다 */
-
-    if (!file_p) return -1;
+    if (!file_p) {
+      lock_release(&filesys_lock);
+      return -1;
+    }
 
     write_bytes = file_write(file_p, buffer, length);
   }
 
-  lock_release(&filesys_lock); /* write()시에 동기화 문제를 위한 lock 해제 */
+  lock_release(&filesys_lock);
 
   return write_bytes;
 }
 
 void do_close(int fd) {
-  struct thread *curr = thread_current();
-  struct file *file;
-
-  /* fdt를 64까지 한바퀴 돌고나서 중간에 삭제해 비어있는 곳에
-     next_fd가 가르킨다면..?
-     즉, 30인 fd를 삭제해서 next_fd가 30인데 60번째 등록된걸 삭제하고싶은경우 */
-  // ASSERT(fd < curr->next_fd);
-  // ASSERT(fd >= 2);
-  if (fd > curr->next_fd) return NULL;
-  // printf("fd : %d\n", fd);
-  file = process_get_file(fd);
-
-  if (!file) return NULL;
-
-  // lock_acquire(&filesys_lock);
-
-  process_close_file(fd);
-
-  // lock_release(&filesys_lock);
+  struct thread *cur_thread = thread_current();
+  struct list_elem *e;
+  struct fd_elem *file_elem;
+  for (e = list_begin(&cur_thread->fdt); e != list_end(&cur_thread->fdt);
+       e = list_next(e)) {
+    file_elem = list_entry(e, struct fd_elem, elem);
+    if (fd == file_elem->fd) {
+      break;
+    }
+  }
+  if (e == list_end(&cur_thread->fdt)) {
+    do_exit(-1);
+  }
+  list_remove(e);
+  lock_acquire(&filesys_lock);
+  file_close(file_elem->file_ptr);
+  lock_release(&filesys_lock);
+  free(file_elem);
 }
 
 /**
@@ -438,21 +421,18 @@ void do_close(int fd) {
  * @param fd file descriptor
  * @param position 이동할 위치
 */
-void seek(int fd, unsigned position) {
+void do_seek(int fd, unsigned position) {
   struct thread *curr = thread_current();
   struct file *file;
 
-  // ASSERT(fd < curr->next_fd);
-  ASSERT(fd >= 2);
+  if (fd < 2) return NULL;
 
-  file = process_get_file(fd);
+  file = convert_fd_to_file(fd);
 
   if (!file) return NULL;
 
   lock_acquire(&filesys_lock);
-
   file_seek(file, position);
-
   lock_release(&filesys_lock);
 }
 
@@ -460,17 +440,12 @@ unsigned do_tell(int fd) {
   struct file *file;
   off_t position;
 
-  // ASSERT(fd < curr->next_fd);
-  // ASSERT(fd >= 2);
-
-  file = process_get_file(fd);
+  file = convert_fd_to_file(fd);
 
   if (!file) return -1;
 
   lock_acquire(&filesys_lock);
-
   position = file_tell(file);
-
   lock_release(&filesys_lock);
 
   if (position < 0) return -1;
@@ -486,21 +461,45 @@ unsigned do_tell(int fd) {
 pid_t do_fork(const char *thread_name) {
   validate_adress(thread_name);
 
-  return process_fork(thread_name, NULL);
+  struct thread *t = thread_current();
+  pid_t child_pid = process_fork(thread_name, NULL);
+
+  if (child_pid == TID_ERROR) {
+    return TID_ERROR;
+  }
+
+  struct thread *child_thread;
+  struct list_elem *e;
+  for (e = list_begin(&t->child_list); e != list_end(&t->child_list);
+       e = list_next(e)) {
+    child_thread = list_entry(e, struct thread, child_elem);
+    if (child_thread->tid == child_pid) {
+      break;
+    }
+  }
+  if (e == list_end(&t->child_list)) {
+    return TID_ERROR;
+  }
+
+  sema_down(&child_thread->fork_sema);
+  if (child_thread->exit_status == TID_ERROR) {
+    return TID_ERROR;
+  }
+
+  return child_pid;
+
+  // return process_fork(thread_name, NULL);
 }
 
 int do_exec(const char *cmd_line) {
   char *file_copy = malloc(strlen(cmd_line) + 1);
+  int result = -1;
 
   strlcpy(file_copy, cmd_line, strlen(cmd_line) + 1);
-
-  int ret = process_exec(file_copy);
-
+  result = process_exec(file_copy);
   free(file_copy);
 
-  if (ret == -1) {
-    do_exit(ret);
-  }
+  if (result == -1) return -1;
 }
 
 int do_wait(pid_t pid) { return process_wait(pid); }
