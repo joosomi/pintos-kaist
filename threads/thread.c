@@ -11,6 +11,7 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "list.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -608,6 +609,10 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   init_thread(new_t, name, priority);
   tid = new_t->tid = allocate_tid();
 
+  struct thread *cur = thread_current();
+  list_push_back(&cur->child_list, &new_t->child_elem);
+
+
   /* Call the kernel_thread if it scheduled.
    * Note) rdi is 1st argument, and rsi is 2nd argument. */
   new_t->tf.rip = (uintptr_t)kernel_thread;
@@ -618,6 +623,17 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->tf.ss = SEL_KDSEG;
   new_t->tf.cs = SEL_KCSEG;
   new_t->tf.eflags = FLAG_IF;
+
+
+  /* ------------- added for Project.2 -------------*/
+
+  new_t->fd_table = palloc_get_multiple(PAL_ZERO, FDT_PAGES);
+  if(new_t->fd_table == NULL) {
+    return TID_ERROR;
+  }
+  new_t->fd_idx = 2;  // 0은 입력, 1은 출력에 이미 할당됨
+  new_t->fd_table[0] = 1;
+  new_t->fd_table[1] = 2;
 
   /* 새로 생성한 쓰레드를 ready_queue에 넣는다.
      thread_unblock() 이라는 함수 명에 혼동되면 안된다.
@@ -914,7 +930,15 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->nice = NICE_DEFAULT;
   t->recent_cpu = RECENT_CPU_DEFAULT;
 
+  /* ----------- added for Project.2 ----------- */
+  t->exit_status = 0;
+  t->running = NULL;
+  list_init(&t->child_list);
+  sema_init(&t->fork_sema, 0);
+  sema_init(&t->fork_sema, 0);
+  sema_init(&t->fork_sema, 0);
   /* ------------------------------------------- */
+
 }
 
 /**

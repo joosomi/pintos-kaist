@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -85,6 +86,11 @@ extern int load_avg;
 
 #define DIV_FP(x, y) (((int64_t)x) * F / y)
 #define DIV_FP_AND_INT(x, n) (x / n)
+
+
+/* ------------ added for Project.2 ------------ */
+#define FDT_PAGES 3 
+#define FDT_COUNT_LIMIT FDT_PAGES *(1<<9)
 
 /* ----------------------------------------------- */
 
@@ -182,7 +188,24 @@ struct thread {
   /* 모든 쓰레드를 관리하는 all_thread_list를 위한 elem */;
   struct list_elem all_thread_elem;
 
+  /* ----------- added for project.2 ----------- */
+  int exit_status;  // exit() 또는 wait() 구현에 사용되는 변수
+	struct file **fd_table;  // fd table
+  int fd_idx;  // fd index
+
+  struct list child_list; // _fork(), wait() 구현 때 사용
+  struct list_elem child_elem; // _fork(), _wait() 구현 때 사용
+  struct intr_frame parent_if; // _fork() 구현 때 사용, __do_fork() 함수
+
+  struct semaphore fork_sema;
+  struct semaphore wait_sema;
+  struct semaphore free_sema;
+
+  struct file *running;
+
+
   /* --------------------------------------------- */
+
 
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
