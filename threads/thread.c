@@ -128,7 +128,7 @@ bool cmp_ascending_priority(const struct list_elem *a,
 int load_avg = LOAD_AVG_DEFAULT;
 
 /* thread_create()로 생성된 **모든** thread를 저장하는 list */
-struct list all_thread_list;
+struct list active_list;
 
 /***************************************************/
 
@@ -332,22 +332,22 @@ int thread_calc_decay(void) {
 }
 
 /**
- * @brief all_thread_list를 순회하며 exec(function)을 실행한다.
+ * @brief active_list를 순회하며 exec(function)을 실행한다.
  * 
  * @param exec 실행할 함수
  * @param aux 실행할 함수의 인자
 */
-void thread_foreach(all_thread_list_func exec, void *aux UNUSED) {
+void thread_foreach(active_list_func exec, void *aux UNUSED) {
   enum intr_level old_level;
   old_level = intr_disable(); /* interrupt off */
 
-  struct list_elem *curr_e = list_begin(&all_thread_list);
+  struct list_elem *curr_e = list_begin(&active_list);
   struct thread *curr_t;
 
   while (1) {
-    if (curr_e == list_end(&all_thread_list)) break;
+    if (curr_e == list_end(&active_list)) break;
 
-    curr_t = list_entry(curr_e, struct thread, all_thread_elem);
+    curr_t = list_entry(curr_e, struct thread, active_elem);
 
     exec(curr_t, aux);
 
@@ -479,7 +479,7 @@ void thread_init(void) {
 
   /* --------------- added for PROJECT.1-3 --------------- */
 
-  list_init(&all_thread_list);
+  list_init(&active_list);
 
   /* ----------------------------------------------------- */
 
@@ -492,7 +492,7 @@ void thread_init(void) {
   /* ------------ after Project.1-3 ------------ */
 
   /* main thread(프로그램을 실행하는)도 thread이기에 all_thread_list에 넣어야 한다. */
-  list_push_back(&all_thread_list, &initial_thread->all_thread_elem);
+  list_push_back(&active_list, &initial_thread->active_elem);
 
   /* ------------------------------------------- */
 }
@@ -633,24 +633,30 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
     (file ptr (8byte) * entry cnt : 64) 할당하면 됐지만
     운영체제에선 page단위로 메모리를 할당하기에 조금 낭비가 있더라도
     이대로 사용하는게 좋다고 판단 */
+  new_t->parent_t = thread_current();
+
   new_t->fdt = palloc_get_page(PAL_ZERO);
-  if (new_t->fdt == NULL) return TID_ERROR; /* 메모리 할당 실패 */
+  if (new_t->fdt == NULL) {
+    palloc_free_page(new_t);
+    return TID_ERROR;
+  }
+  /* 메모리 할당 실패 */
 
   new_t->fdt[STDIN_FILENO] = (struct file *)DUMMY;  /* 표준 입력 stdin */
   new_t->fdt[STDOUT_FILENO] = (struct file *)DUMMY; /* 표준 출력 stdout */
 
-  new_t->next_fd = 2; /* 다음으로 할당될 fd 번호 */
+  // new_t->next_fd = 2; /* 다음으로 할당될 fd 번호 */
 
   /* ------------- added for Project.2-2(Hierarchy) ------------- */
 
   /* thread_create로 function을 넘겨 실행하고있는것은 parent이니까
      parent_t 는 thread_current() 즉, running thread가 된다
      또한, 아직 thread가 생성안됐다는걸 인지하면 이해가 쉬울듯 하다. */
-  struct thread *parent_t = thread_current();
-  new_t->parent_t = parent_t;
-  sema_init(&new_t->load_sema, 0);
-  sema_init(&new_t->exit_sema, 0);
-  list_push_back(&parent_t->child_list, &new_t->child_elem);
+  // sema_init(&new_t->load_sema, 0);
+  // sema_init(&new_t->exit_sema, 0);
+  // sema_init(&new_t->fork_sema, 0);
+
+  list_push_back(&thread_current()->child_list, &new_t->child_elem);
 
   /* ------------- added for Project.1-1 ------------- */
 
@@ -660,8 +666,7 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   thread_unblock(new_t);
 
   /* ------------- added for Project.1-3 ------------- */
-
-  list_push_back(&all_thread_list, &new_t->all_thread_elem);
+  list_push_back(&active_list, &new_t->active_elem);
 
   /* ------------- added for Project.1-2 -------------
     new_thread가 ready_list에 들어가게되는데 arg로 받은 new_thread보다
@@ -795,9 +800,12 @@ void thread_exit(void) {
 
   /* --------------- added for PROJECT.1-3 --------------- */
 
-  list_remove(&thread_current()->all_thread_elem);
+  list_remove(&thread_current()->active_elem);
 
   /* ----------------------------------------------------- */
+  sema_up(&thread_current()->load_sema);
+
+  sema_down(&thread_current()->exit_sema);
 
   do_schedule(THREAD_DYING);
 
@@ -951,13 +959,14 @@ static void init_thread(struct thread *t, const char *name, int priority) {
 
   /* ----------- added for PROJECT.2-2(Hierarchy) ----------- */
 
-  t->exit_status = 0;             /* 자식 프로세스의 종료 상태 */
-  t->parent_t = running_thread(); /* 부모 프로세스 설정 */
-
-  list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
-
+  t->exit_status = 0; /* 자식 프로세스의 종료 상태 */
+  // t->parent_t = running_thread(); /* 부모 프로세스 설정 */
   sema_init(&t->load_sema, 0); /* load_sema 초기화 */
   sema_init(&t->exit_sema, 0); /* exit_sema 초기화 */
+  sema_init(&t->fork_sema, 0); /* wait_sema 초기화 */
+  t->next_fd = 2;
+
+  list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
 
   /* ------------------------------------------- */
 }

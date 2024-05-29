@@ -141,9 +141,9 @@ static void page_fault(struct intr_frame *f) {
 		 
 		 also, process might have tried to access unmapped memory
 		 like : PROJECT.2 test case : bad-{subject} 😡 */
-#ifdef USERPROG
-  exit(-1);
-#endif
+  // #ifdef USERPROG
+  do_exit(-1);
+  // #endif
 
   /* ---------------------------------------------------------- */
 

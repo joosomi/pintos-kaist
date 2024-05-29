@@ -193,33 +193,37 @@ struct thread {
   int nice;
   int recent_cpu; /* **최근** CPU사용량을 표현하는 Fixed_Point */
 
-  /* 모든 쓰레드를 관리하는 all_thread_list를 위한 elem */;
-  struct list_elem all_thread_elem;
+  /* 모든 쓰레드를 관리하는 active_list를 위한 elem */;
+  struct list_elem active_elem;
 
   /* --------------- added for PRJECT.2-2  --------------- */
+
+  // #ifdef USERPROG
+  /* Owned by userprog/process.c. */
+  uint64_t *pml4; /* Page map level 4 */
 
   int exit_status;         /* 쓰레드의 종료 상태 */
   int success_load_status; /* load 성공 여부 */
 
   /* for file manipulation */
   struct file **fdt; /* file descriptor table */
-  int next_fd;       /* 테이블에 등록된 fd + 1
-                           즉, 다음에 저장될 fd의 값을 의미한다 */
+  int next_fd; /* 테이블에 등록된 fd + 1 즉, 다음에 저장될 fd의 값을 의미한다 */
+  struct file *running_file; /* 실행중인 파일 */
 
   struct semaphore exit_sema;
   struct semaphore load_sema;
+  struct semaphore fork_sema;
 
   /* For Process hierarchy */
   struct list child_list;      /* 자식 쓰레드들을 관리하는 list */
   struct list_elem child_elem; /* 자식 쓰레드들을 관리하는 list_elem */
   struct thread *parent_t;     /* 부모 쓰레드 */
+  struct intr_frame parent_if; /* fork를 호출한 부모의 if 
+                                   (before context switch) */
+  // #endif
 
   /* ----------------------------------------------------- */
 
-  // #ifdef USERPROG
-  /* Owned by userprog/process.c. */
-  uint64_t *pml4; /* Page map level 4 */
-// #endif
 #ifdef VM
   /* Table for whole virtual memory owned by thread. */
   struct supplemental_page_table spt;
@@ -247,7 +251,7 @@ void check_preempt(void);
 
 /* ----------- added for Project.1-3 ----------- */
 
-typedef void (*all_thread_list_func)(struct thread *t, void *aux);
+typedef void (*active_list_func)(struct thread *t, void *aux);
 
 void thread_set_priority_mlfqs(struct thread *t, void *aux UNUSED);
 
@@ -259,7 +263,7 @@ int thread_calc_decay(void);
 void thread_increase_recent_cpu_of_running(void);
 void thread_update_recent_cpu(struct thread *t, void *aux UNUSED);
 
-void thread_foreach(all_thread_list_func exec, void *aux UNUSED);
+void thread_foreach(active_list_func exec, void *aux UNUSED);
 
 /* -------------------------------------------- */
 
