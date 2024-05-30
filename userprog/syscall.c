@@ -32,7 +32,7 @@ void syscall_handler(struct intr_frame *);
 static struct file *convert_fd_to_file(int fd) {
   struct list_elem *e;
   struct thread *cur_thread = thread_current();
-  for (e = list_begin(&cur_thread->fdt); e != list_end(&cur_thread->fdt);
+  for (e = list_begin(cur_thread->fdt); e != list_end(cur_thread->fdt);
        e = list_next(e)) {
     struct fd_elem *tmp = list_entry(e, struct fd_elem, elem);
     if (fd == tmp->fd) {
@@ -248,7 +248,7 @@ int do_open(const char *file) {
   struct fd_elem *file_elem = (struct fd_elem *)malloc(sizeof(struct fd_elem));
   file_elem->fd = cur_thread->next_fd++;
   file_elem->file_ptr = file_ptr;
-  list_push_back(&cur_thread->fdt, &file_elem->elem);
+  list_push_back(cur_thread->fdt, &file_elem->elem);
   return file_elem->fd;
 }
 
@@ -398,14 +398,15 @@ void do_close(int fd) {
   struct thread *cur_thread = thread_current();
   struct list_elem *e;
   struct fd_elem *file_elem;
-  for (e = list_begin(&cur_thread->fdt); e != list_end(&cur_thread->fdt);
+  for (e = list_begin(cur_thread->fdt); e != list_end(cur_thread->fdt);
        e = list_next(e)) {
     file_elem = list_entry(e, struct fd_elem, elem);
+
     if (fd == file_elem->fd) {
       break;
     }
   }
-  if (e == list_end(&cur_thread->fdt)) {
+  if (e == list_end(cur_thread->fdt)) {
     do_exit(-1);
   }
   list_remove(e);

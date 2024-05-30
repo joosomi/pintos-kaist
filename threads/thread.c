@@ -632,6 +632,11 @@ tid_t thread_create(const char *name, int priority, thread_func *function,
   new_t->parent_t = thread_current();
   list_push_back(&thread_current()->child_list, &new_t->child_elem);
 
+  new_t->fdt = (struct list *)malloc(sizeof(struct list));
+  if (new_t->fdt == NULL) return TID_ERROR;
+
+  list_init(new_t->fdt);
+
   /* ------------------ added for Project.1-1 ------------------- */
 
   /* 새로 생성한 쓰레드를 ready_queue에 넣는다. thread_unblock()
@@ -942,7 +947,6 @@ static void init_thread(struct thread *t, const char *name, int priority) {
   t->next_fd = 2;
 
   list_init(&t->child_list); /* 자식 프로세스 list 초기화 */
-  list_init(&t->fdt);
 
   /* ------------------------------------------- */
 }

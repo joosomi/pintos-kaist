@@ -32,15 +32,29 @@ static void __do_fork(void *);
 
 static void fdt_cleanup() {
   struct thread *current = thread_current();
-  file_close(current->running_file);
-  current->running_file = NULL;
-  while (!list_empty(&current->fdt)) {
-    struct list_elem *e = list_pop_front(&current->fdt);
-    struct fd_elem *tmp = list_entry(e, struct fd_elem, elem);
-    struct file *file_ptr = tmp->file_ptr;
-    file_close(file_ptr);
+  // file_close(current->running_file);
+  // current->running_file = NULL;
+  // while (!list_empty(current->fdt)) {
+  //   struct list_elem *e = list_pop_front(current->fdt);
+  //   struct fd_elem *fd_e = list_entry(e, struct fd_elem, elem);
+  //   struct file *file_ptr = fd_e->file_ptr;
+  //   file_close(file_ptr);
+  //   free(fd_e);
+  // }
+
+  // free(current->fdt);
+
+  struct thread *current = thread_current();
+  struct fd_elem *tmp = NULL;
+  struct thread *child = NULL;
+
+  while (!list_empty(current->fdt)) {
+    tmp = list_entry(list_pop_front(current->fdt), struct fd_elem, elem);
+    file_close(tmp->file_ptr);
     free(tmp);
   }
+
+  free(current->fdt);
 }
 
 /**
@@ -391,18 +405,18 @@ static void __do_fork(void *aux) {
   /* ----------- added for PROJECT.2-2 (fork) ----------- */
 
   current->next_fd = parent->next_fd;
-  for (struct list_elem *e = list_begin(&parent->fdt);
-       e != list_end(&parent->fdt); e = list_next(e)) {
+  for (struct list_elem *e = list_begin(parent->fdt);
+       e != list_end(parent->fdt); e = list_next(e)) {
     struct fd_elem *tmp = list_entry(e, struct fd_elem, elem);
     struct file *dup_file = file_duplicate(tmp->file_ptr);
     if (dup_file == NULL) goto error;
 
-    struct fd_elem *e = (struct fd_elem *)malloc(sizeof(struct fd_elem));
-    if (e == NULL) goto error;
+    struct fd_elem *dup = (struct fd_elem *)malloc(sizeof(struct fd_elem));
+    if (dup == NULL) goto error;
 
-    e->file_ptr = dup_file;
-    e->fd = tmp->fd;
-    list_push_back(&current->fdt, &e->elem);
+    dup->file_ptr = dup_file;
+    dup->fd = tmp->fd;
+    list_push_back(current->fdt, &dup->elem);
   }
 
   process_init();
@@ -549,7 +563,6 @@ void process_exit(void) {
   struct file *file;
 
   /* CLOSE : 열려있는 file을 모두 닫고 fd Table을 deallocate ! */
-  fdt_cleanup();
 
   for (struct list_elem *e = list_begin(&curr_t->child_list);
        e != list_end(&curr_t->child_list); e = list_next(e)) {
@@ -558,6 +571,8 @@ void process_exit(void) {
       child_t->parent_t = NULL;
     }
   }
+
+  fdt_cleanup();
 
   /* parent의 process_wait()를 release ! */
   sema_up(&curr_t->load_sema);
