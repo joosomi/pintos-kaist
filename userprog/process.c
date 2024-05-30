@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #include "threads/synch.h"
+#include "list.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -262,6 +263,7 @@ struct thread
 
 	struct thread *cur = thread_current ();
 	struct list *child_list = &cur->child_list;
+	
 	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
 		struct thread *t = list_entry(e, struct thread, child_elem);
 		if (t->tid == pid) {
@@ -379,26 +381,27 @@ void argument_stack(char **argu, int count, void **rsp)
 int process_wait(tid_t child_tid UNUSED)
 {	
 
-	for(int i = 0; i < 2000000000; i++) {
+	// for(int i = 0; i < 2000000000; i++) {
 
-	}
-	return -1;
+	// }
+	// return -1;
 
-    // struct thread *child = get_child(child_tid);
-    // // 본인의 자식이 아닌경우(호출 프로세스의 하위 항목이 아닌 경우)
-    // if (child == NULL)
-    //     return -1;
+    struct thread *child = get_child(child_tid);
 
-    // sema_down(&child->wait_sema); // 여기서는 parent가 잠드는 거고
+    // 본인의 자식이 아닌경우(호출 프로세스의 하위 항목이 아닌 경우)
+    if (child == NULL)
+        return -1;
 
-    // // 여기서부터는 깨어났다.
-    // // 깨어나면 child의 exit_status를 얻는다.
-    // int exit_status = child->exit_status;
-    // // child를 부모 list에서 지운다.
-    // list_remove(&child->child_elem);
-    // // 내가 받았음을 전달하는 sema
-    // sema_up(&child->free_sema);
-    // return exit_status;
+    sema_down(&child->wait_sema); // 여기서는 parent가 잠드는 거고
+
+    // 여기서부터는 깨어났다.
+    // child를 부모 list에서 지운다.
+    list_remove(&child->child_elem);
+
+    // 내가 받았음을 전달하는 sema
+    sema_up(&child->free_sema);
+
+    return child->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
@@ -410,18 +413,23 @@ void process_exit(void)
      * TODO: project2/process_termination.html).
      * TODO: We recommend you to implement process resource cleanup here. */
     // project 2-4
-    // for (int i = 0; i < FDT_COUNT_LIMIT; i++)
-    // {
-    //     close(i);
-    // }
-    // // for multi-oom(메모리 누수)
-    // palloc_free_multiple(cur->fd_table, FDT_PAGES);
-    // // for rox- (실행중에 수정 못하도록)
-    // file_close(cur->running);
 
-    // sema_up(&cur->wait_sema);    // 종료되었다고 기다리고 있는 부모 thread에게 signal 보냄-> sema_up에서 val을 올려줌
-    // sema_down(&cur->free_sema); // 부모의 exit_Status가 정확히 전달되었는지 확인(wait)
+    for (int i = 2; i < FDT_COUNT_LIMIT; i++)
+    {
+        close(i);
+    }
+	
+    // for multi-oom(메모리 누수)
+    palloc_free_multiple(cur->fd_table, FDT_PAGES);
+
+	// file_close(cur->running);
+
+    sema_up(&cur->wait_sema);    // 종료되었다고 기다리고 있는 부모 thread에게 signal 보냄-> sema_up에서 val을 올려줌
+
+    sema_down(&cur->free_sema); // 부모의 exit_Status가 정확히 전달되었는지 확인(wait)
+
     process_cleanup();            // pml4를 날림(이 함수를 call 한 thread의 pml4)
+
 }
 
 /* Free the current process's resources. */

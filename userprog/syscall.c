@@ -166,23 +166,32 @@ void exit(int status)
 
 int write (int fd, const void *buffer, unsigned size) {
 	
+
 	check_address(buffer);
 	struct file *fileobj = find_file_by_fd(fd);
+
 	int read_count;
 	if (fd == STDOUT_FILENO) {
+
+
 		putbuf(buffer, size);
+
 		read_count = size;
 	}	
 	
 	else if (fd == STDIN_FILENO) {
+
 		return -1;
 	}
 
 	else {
-		
+
 		lock_acquire(&filesys_lock);
+
 		read_count = file_write(fileobj, buffer, size);
+
 		lock_release(&filesys_lock);
+
 
 	}
 }
