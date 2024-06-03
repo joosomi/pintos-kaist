@@ -109,12 +109,8 @@ void syscall_handler (struct intr_frame *f UNUSED) {
 void check_address(void *addr) {
 	struct thread *t = thread_current();
 
-	/* --- Project 2: User memory access --- */
-	// if (!is_user_vaddr(addr)||addr == NULL) 
-	//-> 이 경우는 유저 주소 영역 내에서도 할당되지 않는 공간 가리키는 것을 체크하지 않음. 그래서 
-	// pml4_get_page를 추가해줘야!
-	if (!is_user_vaddr(addr)||addr == NULL||
-	pml4_get_page(t->pml4, addr)== NULL)
+
+	if (!is_user_vaddr(addr) || addr == NULL || pml4_get_page(t->pml4, addr) == NULL)
 	{
 		exit(-1);
 	}
@@ -131,6 +127,7 @@ bool create (const char *file, unsigned initial_size) {
 	check_address(file);
 	
 	lock_acquire(&filesys_lock);
+
 	if (filesys_create(file, initial_size)) {
 		lock_release(&filesys_lock);
 		return true;
@@ -142,7 +139,9 @@ bool create (const char *file, unsigned initial_size) {
 
 bool remove (const char *file) {
 	check_address(file);
+
 	lock_acquire(&filesys_lock);
+
 	if (filesys_remove(file)) {
 		lock_release(&filesys_lock);
 		return true;
@@ -157,9 +156,11 @@ void exit(int status)
 {
 	struct thread *t = thread_current();
 	t->exit_status = status;
+
 	printf("%s: exit(%d)\n", t->name, status); // Process Termination Message
 	/* 정상적으로 종료됐다면 status는 0 */
 	/* status: 프로그램이 정상적으로 종료됐는지 확인 */
+
 	thread_exit();
 }
 
@@ -169,30 +170,21 @@ int write (int fd, const void *buffer, unsigned size) {
 
 	check_address(buffer);
 	struct file *fileobj = find_file_by_fd(fd);
-
 	int read_count;
 	if (fd == STDOUT_FILENO) {
 
-
 		putbuf(buffer, size);
-
 		read_count = size;
 	}	
-	
 	else if (fd == STDIN_FILENO) {
 
 		return -1;
 	}
-
 	else {
 
 		lock_acquire(&filesys_lock);
-
 		read_count = file_write(fileobj, buffer, size);
-
 		lock_release(&filesys_lock);
-
-
 	}
 }
 
@@ -224,17 +216,17 @@ int add_file_to_fdt(struct file *file)
     struct thread *cur = thread_current();
     struct file **fdt = cur->fd_table;
 
-    // Find open spot from the front
-    //  fd 위치가 제한 범위 넘지않고, fd table의 인덱스 위치와 일치한다면
+    //  fd 범위를 넘지 않는 선에서, 할당 가능한 fd 번호를 찾는다.
     while (cur->fd_idx < FDT_COUNT_LIMIT && fdt[cur->fd_idx])
     {
         cur->fd_idx++;
     }
 
-    // error - fd table full
+    // fd table이 꽉 찼을 경우 -1 리턴
     if (cur->fd_idx >= FDT_COUNT_LIMIT)
         return -1;
 
+	// fd table에 파일을 할당하고 fd 번호를 리턴한다
     fdt[cur->fd_idx] = file;
     return cur->fd_idx;
 }
@@ -279,25 +271,35 @@ int filesize(int fd)
 int read(int fd, void *buffer, unsigned size)
 {
     check_address(buffer);
+	
+	// 읽은 바이트 수 저장할 변수
     off_t read_byte;
+	// 버퍼를 바이트 단위로 접근하기 위한 포인터
     uint8_t *read_buffer = buffer;
+
+	// 표준입력일 경우 데이터를 읽는다
     if (fd == 0)
     {
         char key;
         for (read_byte = 0; read_byte < size; read_byte++)
         {
+			// input_getc 함수로 입력을 가져오고, buffer에 저장한다
             key = input_getc();
             *read_buffer++ = key;
+
+			// 널 문자를 만나면 종료한다.
             if (key == '\0')
             {
                 break;
             }
         }
     }
+	// 표준출력일 경우 -1을 리턴한다.
     else if (fd == 1)
     {
         return -1;
     }
+	// 2이상, 즉 파일일 경우 파일을 읽어온다.
     else
     {
         struct file *read_file = find_file_by_fd(fd);
@@ -309,6 +311,8 @@ int read(int fd, void *buffer, unsigned size)
         read_byte = file_read(read_file, buffer, size);
         lock_release(&filesys_lock);
     }
+
+	// 읽어온 바이트 수 리턴
     return read_byte;
 }
 
@@ -342,15 +346,18 @@ void close(int fd){
 		return;
 	}
 
+	// fd에 해당하는 파일 찾기
     struct file *fileobj = find_file_by_fd(fd);
     if (fileobj == NULL)
     {
         return;
     }
 
+	// fd table에서 파일 삭제하기
     remove_file_from_fdt(fd);
 
 	lock_acquire(&filesys_lock);
+	// 파일 닫기
 	file_close(fileobj);
 	lock_release(&filesys_lock);
 }
@@ -365,17 +372,29 @@ tid_t fork(const char *thread_name, struct intr_frame *f) {
 int exec(char *file_name)
 {
     check_address(file_name);
-    int file_size = strlen(file_name) + 1;
+
+	// file_name의 길이를 구한다. 
+	// strlen은 널 문자를 포함하지 않기 때문에 널 문자 포함을 위해 1을 더해준다.
+    int file_name_size = strlen(file_name) + 1;
+
+	// 새로운 페이지를 할당받고 0으로 초기화한다.(PAL_ZERO)
+	// 여기에 file_name을 복사할 것이다
     char *fn_copy = palloc_get_page(PAL_ZERO);
     if (fn_copy == NULL)
     {
         exit(-1);
     }
-    strlcpy(fn_copy, file_name, file_size); // file 이름만 복사
+
+	// file_name 문자열을 file_name_size만큼 fn_copy에 복사한다
+    strlcpy(fn_copy, file_name, file_name_size);
+
+	// process_exec 호출, 여기서 인자 파싱 및 file load 등등이 일어난다.
+	// file 실행이 실패했다면 -1을 리턴한다.
     if (process_exec(fn_copy) == -1)
     {
         return -1;
     }
+
     NOT_REACHED();
     return 0;
 }
@@ -383,6 +402,7 @@ int exec(char *file_name)
 
 int wait (tid_t pid)
 {
+	// pid에 해당하는 자식 프로세스가 종료되기를 기다린다.
 	process_wait(pid);
 }
 

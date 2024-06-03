@@ -84,21 +84,35 @@ process_fork (const char *name, struct intr_frame *if_ UNUSED) {
 	/* Clone current thread to new thread.*/
 
 	/* --- Project 2: system call --- */
+	// if에 담긴 현재 CPU 상태, 즉 실행중이던 부모 프로세스 context들을 복사한다.
+	// if를 직접 넘기면 race condition이나 동기화 측면의 문제가 발생할 수 있기 때문에,
+	// 부모 스레드의 parent_if 필드에 if를 복사하여 부모 스레드를 __do_fork의 인자로 넘겨준다.
 	struct thread *parent = thread_current();
-	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame)); // 부모 프로세스 메모리를 복사
+	memcpy(&parent->parent_if, if_, sizeof(struct intr_frame));
 
-	tid_t pid = thread_create(name, PRI_DEFAULT, __do_fork, parent); // 전달받은 thread_name으로 __do_fork()를 진행
+	// 전달받은 thread_name으로 스레드 생성
+	// 복제된 if를 가지고 있는 parent를 인자로 넣어 __do_fork() 진행
+	// 자식 프로세스가 running되면 즉시 __do_fork를 실행하게 된다.
+	tid_t pid = thread_create(name, PRI_DEFAULT, __do_fork, parent); 
 
+	// 스레드 생성에 실패했을 경우 TID_ERROR 리턴
 	if (pid == TID_ERROR) {
 		return TID_ERROR;
 	}
-	/* --- Project 2: system call --- */
+
+	// 부모 스레드의 child_list에서, pid를 이용해 방금 생성한 자식 스레드 가져오기
 	struct thread *child = get_child(pid);
+
+	// 자식 프로세스가 실행하는 __do_fork가 끝나기를 기다린다.
+	// if 복제가 완료되면, __do_fork 함수에서 자식 프로세스가 sema_up을 해준다.
 	sema_down(&child->fork_sema);
+
+	// 여기부터는 자식 프로세스의 __do_fork가 완료된 후 진행된다
 	if (child->exit_status == -1)
     {
         return TID_ERROR;
     }
+	// fork할 때 부모에게는 자식의 PID를, 자식에게는 0을 리턴하는 것이 POSIX 표준이다.
 	return pid;
 }
 
@@ -114,13 +128,15 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
     void *newpage;
     bool writable;
 
-    /* 1. TODO: If the parent_page is kernel page, then return immediately. */
+	// 주어진 가상 주소(va)가 커널 영역에 있다면 즉시 true를 리턴한다.
+	// 커널 페이지는 복사할 필요가 없기 때문 -> 커널 영역은 모든 프로세스에 의해 공유되는 메모리 영역이다
     if (is_kernel_vaddr(va))
     {
-        // return false ends pml4_for_each. which is undesirable - just return true to pass this kernel va
         return true;
     }
-    /* 2. Resolve VA from the parent's page map level 4. */
+
+    // 부모의 페이지 테이블에서 va와 매핑되는 실제 페이지를 찾는다. 실제 물리 메모리 주소.
+	// 만약 없다면 false를 리턴한다
     parent_page = pml4_get_page(parent->pml4, va);
     if (parent_page == NULL)
     {
@@ -134,24 +150,35 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
     void *test = ptov(PTE_ADDR(*pte)) + pg_ofs(va); // should be same as parent_page -> Yes!
     uint64_t va_offset = pg_ofs(va);                // should be 0; va comes from PTE, so there must be no 12bit physical offset
 #endif
-    /* 3. TODO: Allocate new PAL_USER page for the child and set result to
-     *    TODO: NEWPAGE. */
+    
+	// 자식 프로세스(지금 running 중이다)를 위한 페이지를 할당한다
+	// PAL_USER는 유저 영역에 페이지를 할당하도록 하는 플래그이다
     newpage = palloc_get_page(PAL_USER);
     if (newpage == NULL)
     {
         printf("[fork-duplicate] failed to palloc new page\n");
         return false;
     }
+
     /* 4. TODO: Duplicate parent's page to the new page and
      *    TODO: check whether parent's page is writable or not (set WRITABLE
      *    TODO: according to the result). */
+
+	// 부모 페이지를(PTE, 4096byte) newpage에 복사한다
     memcpy(newpage, parent_page, PGSIZE);
-    writable = is_writable(pte); // pte는 parent_page를 가리키는 주소
+
+	// 부모 페이지 쓰기 가능 여부를 검사하여 writable에 결과를 저장한다 (boolean)
+    writable = is_writable(pte);
+
+
     /* 5. Add new page to child's page table at address VA with WRITABLE
      *    permission. */
+	// 자식 프로세스 페이지 테이블에 새로운 페이지를(PTE) 추가한다
+	// va, writable을 설정하여 새로운 페이지 추가
     if (!pml4_set_page(current->pml4, va, newpage, writable))
     {
         /* 6. TODO: if fail to insert page, do error handling. */
+		// 실패하면 false 반환
         printf("Failed to map user virtual page to given physical frame\n");
         return false;
     }
@@ -172,39 +199,52 @@ duplicate_pte(uint64_t *pte, void *va, void *aux)
  * Hint) parent->tf does not hold the userland context of the process.
  *       That is, you are required to pass second argument of process_fork to
  *       this function. */
+
 static void
-__do_fork(void *aux) // load로 볼 수도 있다(부모의 것들을 자식에게 다 복사해서 메모리에 올리는 과정)
+__do_fork(void *aux)
 {
+	/* 자식 프로세스는 running 되자마자 바로 __do_fork를 실행한다!!*/
+
     struct intr_frame if_;
+	// 인터럽트 프레임이 aux의 parent_if 필드에 복사되어 있다.
     struct thread *parent = (struct thread *)aux;
     struct thread *current = thread_current();
-    /* TODO: somehow pass the parent_if. (i.e. process_fork()'s if_) */
+    
     struct intr_frame *parent_if;
     bool succ = true;
-    // project 2 : system call
+    
+	// 복사해서 받아온 if를 parent_if 포인터 변수에 담는다.
     parent_if = &parent->parent_if;
 
 #ifdef DEBUG
     printf("[Fork] Forking from %s to %s\n", parent->name, current->name);
 #endif
 
-    /* 1. Read the cpu context to local stack. */
+	// 부모 인터럽트 프레임을 자식 프로세스로 복사한다
     memcpy(&if_, parent_if, sizeof(struct intr_frame));
-    // project 2 : system call
+
+    // 자식 프로세스 리턴값을 0으로 설정한다
+	// fork할 때 부모에게는 자식의 PID를, 자식에게는 0을 리턴하는 것이 POSIX 표준이다.
     if_.R.rax = 0;
 
     /* 2. Duplicate PT */
+	// 자식 프로세스를 위한 페이지 테이블 생성 및 할당
     current->pml4 = pml4_create();
     if (current->pml4 == NULL)
         goto error;
 
-    process_activate(current); //tss를 업데이트 해준다.
+	// 페이지 테이블을 CPU의 테이블 레지스터에 로드하고 TSS를 업데이트한다
+	// TSS : 태스크 상태 세그먼트
+	// 태스크 : 프로세스, 스레드 같은 실행 단위를 포괄적으로 지칭
+	// 이 부분에서는 스택 포인터 관련 정보를 업데이트한다
+    process_activate(current);
 
 #ifdef VM
     supplemental_page_table_init(&current->spt);
     if (!supplemental_page_table_copy(&current->spt, &parent->spt))
         goto error;
 #else
+	// 부모 페이지 테이블의 PTE를 순회하며, 현재 자식 스레드 페이지 테이블로 복제한다
     if (!pml4_for_each(parent->pml4, duplicate_pte, parent))
         goto error;
 #endif
@@ -215,13 +255,14 @@ __do_fork(void *aux) // load로 볼 수도 있다(부모의 것들을 자식에�
      * TODO:       from the fork() until this function successfully duplicates
      * TODO:       the resources of parent.*/
 
-    // process_init();
-    // project 2 : system call
+    
     if (parent->fd_idx == FDT_COUNT_LIMIT)
         goto error;
 
+	// fd table 복제
     for (int i = 0; i < FDT_COUNT_LIMIT; i++)
     {
+		// 부모의 fd table에서 파일을 가져온다
         struct file *file = parent->fd_table[i];
         if (file == NULL)
             continue;
@@ -229,20 +270,27 @@ __do_fork(void *aux) // load로 볼 수도 있다(부모의 것들을 자식에�
         bool found = false;
         if (!found)
         {
+			// 부모 fd table의 file을 new_file에 복제한다
             struct file *new_file;
             if (file > 2)
                 new_file = file_duplicate(file);
             else
                 new_file = file;
+			
+			// 복제한 file을 자식 프로세스 fd table에 그대로 할당한다
             current->fd_table[i] = new_file;
         }
     }
+
+	// 부모의 fd_idx도 복제한다
     current->fd_idx = parent->fd_idx;
 
 #ifdef DEBUG
     printf("[do_fork] %s Ready to switch!\n", current->name);
 #endif
 
+	// 부모는 자식 스레드를 생성해 놓고 sema_down으로 if 복제, 즉 __do_fork가 끝나기를 기다리고 있었다.
+	// 복제가 완료되었으니 sema_up을 해서 부모의 process_fork 함수가 이어서 진행되도록 한다.
     sema_up(&current->fork_sema);
 
     /* Finally, switch to the newly created process. */
@@ -251,6 +299,8 @@ __do_fork(void *aux) // load로 볼 수도 있다(부모의 것들을 자식에�
 error:
     // thread_exit();
     // project 2 : system call
+
+	// 에러가 났을 경우 exit_status를 ERROR로 설정하고 sema_up 해준 후 프로세스를 종료한다.
     current->exit_status = TID_ERROR;
     sema_up(&current->fork_sema);
     exit(TID_ERROR);
@@ -261,15 +311,19 @@ error:
 struct thread
 *get_child(int pid) {
 
+	// 현재 스레드의 child list 가져오기
 	struct thread *cur = thread_current ();
 	struct list *child_list = &cur->child_list;
 	
+	// child list를 순회하며 인자로 받은 pid에 해당하는 스레드를 반환한다
 	for (struct list_elem *e = list_begin(child_list); e != list_end(child_list); e = list_next(e)){
 		struct thread *t = list_entry(e, struct thread, child_elem);
 		if (t->tid == pid) {
 			return t;
 		}
 	}
+	
+	// child list에 pid에 해당하는 스레드가 없다면 NULL을 반환한다
 	return NULL;
 }
 
@@ -380,56 +434,63 @@ void argument_stack(char **argu, int count, void **rsp)
  * does nothing. */
 int process_wait(tid_t child_tid UNUSED)
 {	
-
-	// for(int i = 0; i < 2000000000; i++) {
-
-	// }
-	// return -1;
-
+	// tid에 해당하는 자식 스레드를 가져온다.
     struct thread *child = get_child(child_tid);
 
-    // 본인의 자식이 아닌경우(호출 프로세스의 하위 항목이 아닌 경우)
+    // 자식 스레드가 아닌 경우 return -1
     if (child == NULL)
         return -1;
 
-    sema_down(&child->wait_sema); // 여기서는 parent가 잠드는 거고
+	// 자식 프로세스가 끝날 때 까지 잠든다.(BLOCKED 되어 있는다)
+    sema_down(&child->wait_sema);
 
-    // 여기서부터는 깨어났다.
-    // child를 부모 list에서 지운다.
+	/// 자는 중 ///
+	/// 자는 중 ///
+
+	// 여기서부터는 깨어났다. 
+	// 자식 프로세스 측에서 끝낼 준비를 다 했다는 의미로, process_exit 함수에서 sema_up을 해 주었다.
+    // 자식은 부모가 자신을 child_list에서 지우기고 exit status를 return 하는 것을 기다리기 위해 sema_down 하여 자고 있다.
+    // 자식 프로세스를 child_list에서 지우기
     list_remove(&child->child_elem);
 
-    // 내가 받았음을 전달하는 sema
+    // child_list에서 지웠으므로, 이제 자식이 종료될 수 있도록 sema_up을 해 준다.
     sema_up(&child->free_sema);
 
+	// 자식 프로세스 exit status를 return 한다.
     return child->exit_status;
 }
 
 /* Exit the process. This function is called by thread_exit (). */
 void process_exit(void)
 {
-    struct thread *cur = thread_current();
-    /* TODO: Your code goes here.
-     * TODO: Implement process termination message (see
-     * TODO: project2/process_termination.html).
-     * TODO: We recommend you to implement process resource cleanup here. */
-    // project 2-4
+	// 프로세스 종료를 위한 정리 작업을 하는 함수
+	// exit 시스템 콜에서 이미 exit status는 설정되었다.
+	// 설정된 이후 thread_exit()를 통해 process_exit()가 호출된 것이다.
 
+	// fd table에 할당되어 있는 열린 파일들을 모두 닫는다.
+    struct thread *cur = thread_current();
     for (int i = 2; i < FDT_COUNT_LIMIT; i++)
     {
+		// close 시스템 콜
         close(i);
     }
 	
-    // for multi-oom(메모리 누수)
+    // 메모리 누수 방지를 위해 fd table을 할당 해제한다.
     palloc_free_multiple(cur->fd_table, FDT_PAGES);
 
-	// file_close(cur->running);
+	// 이제 끝낼 준비가 되었다.
+	// 따라서 process_wait()에서 자식이 끝날 때 까지 자고 있는 부모를 깨워준다.
+    sema_up(&cur->wait_sema);
 
-    sema_up(&cur->wait_sema);    // 종료되었다고 기다리고 있는 부모 thread에게 signal 보냄-> sema_up에서 val을 올려줌
+	// process_wait()에서 부모가 child_list에서 자식을 제거한 후 exit status를 return할 수 있도록 sema_down으로 자고 있는다.
+    sema_down(&cur->free_sema);
 
-    sema_down(&cur->free_sema); // 부모의 exit_Status가 정확히 전달되었는지 확인(wait)
+	/// 자는 중 ///
+	/// 자는 중 ///
 
-    process_cleanup();            // pml4를 날림(이 함수를 call 한 thread의 pml4)
-
+	// 부모는 작업을 마쳤다. 스레드의 페이지 테이블을 할당 해제한다.
+	// 나머지 세부적인 종료 절차들은 운영체제가 수행한 후 종료된다.
+    process_cleanup();
 }
 
 /* Free the current process's resources. */

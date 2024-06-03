@@ -89,8 +89,8 @@ extern int load_avg;
 
 
 /* ------------ added for Project.2 ------------ */
-#define FDT_PAGES 3 
-#define FDT_COUNT_LIMIT FDT_PAGES *(1<<9)
+#define FDT_PAGES 3  // fd table에 할당할 페이지 수
+#define FDT_COUNT_LIMIT FDT_PAGES *(1<<9)  // fd table 최대 크기 3 * 512 : 1536
 
 /* ----------------------------------------------- */
 
